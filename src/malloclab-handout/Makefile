@@ -1,14 +1,18 @@
 #
 # Students' Makefile for the Malloc Lab
 #
-TEAM = bovik
-VERSION = 1
-HANDINDIR = /afs/cs.cmu.edu/academic/class/15213-f01/malloclab/handin
+
+# example:
+# make strategy=USE_IMPLICIT
 
 CC = clang
-CFLAGS = -Wall -O2 -m32
+CFLAGS = -Wall -O2 -m32 -g -D$(strategy)
 
-OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o
+ifeq ($(strategy),USE_IMPLICIT)
+	allocator=implicit
+endif
+
+OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o $(allocator).o
 
 mdriver: $(OBJS)
 	$(CC) $(CFLAGS) -o mdriver $(OBJS)
@@ -21,8 +25,8 @@ fcyc.o: fcyc.c fcyc.h
 ftimer.o: ftimer.c ftimer.h config.h
 clock.o: clock.c clock.h
 
-handin:
-	cp mm.c $(HANDINDIR)/$(TEAM)-$(VERSION)-mm.c
+# allocators:
+implicit.o: implicit.c implicit.h memlib.h utils.h
 
 clean:
 	rm -f *~ *.o mdriver

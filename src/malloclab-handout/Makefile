@@ -3,10 +3,10 @@
 #
 
 # example:
-# make strategy=USE_IMPLICIT
+# make strategy=USE_IMPLICIT fit=USE_FIRST_FIT
 
 CC = clang
-CFLAGS = -Wall -O2 -m32 -g -D$(strategy)
+CFLAGS = -Wall -O2 -m32 -ggdb3 -D$(strategy) -D$(fit)
 
 ifeq ($(strategy),USE_IMPLICIT)
 	allocator=implicit

@@ -2,17 +2,30 @@
 # Students' Makefile for the Malloc Lab
 #
 
-# example:
-# make strategy=USE_IMPLICIT fit=USE_FIRST_FIT
+ALLOCATOR =
+STRATEGY = USE_IMPLICIT
+FIT = USE_FIRST_FIT
+DUMP = 0
+DEBUG = 0
 
 CC = clang
-CFLAGS = -Wall -O2 -m32 -ggdb3 -D$(strategy) -D$(fit)
+CFLAGS = -Wall -m32
 
-ifeq ($(strategy),USE_IMPLICIT)
-	allocator=implicit
+ifeq ($(DEBUG), 1)
+	CFLAGS += -O0 -ggdb3 -DDEBUG
 endif
 
-OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o $(allocator).o
+ifeq ($(DUMP), 1)
+	CFLAGS += -DDUMP_HEAP
+endif
+
+CFLAGS += -D$(STRATEGY) -D$(FIT)
+
+ifeq ($(STRATEGY), USE_IMPLICIT)
+	ALLOCATOR=implicit
+endif
+
+OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o $(ALLOCATOR).o
 
 mdriver: $(OBJS)
 	$(CC) $(CFLAGS) -o mdriver $(OBJS)

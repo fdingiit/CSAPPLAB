@@ -62,10 +62,10 @@
 #define PREV_BLK_ALLOC(p)   GET_ALLOC(RB_PREV_FTRP(p))
 #define PREV_BLK_SIZE(p)    GET_SIZE(RB_PREV_FTRP(p))
 #define NEXT_BLK_ALLOC(p)   GET_ALLOC(RB_NEXT_HDRP(p))
-#define NEXT_BLK_SIZE(p)    RB_SIZE(RB_NEXT_HDRP(p))
+#define NEXT_BLK_SIZE(p)    GET_SIZE(RB_NEXT_HDRP(p))
 
 
-
+void dump(char *, size_t);
 
 static void *heap_listp;    /* start point of the implicit heap list */
 
@@ -119,6 +119,10 @@ void *place(void *bp, size_t size) {
  * @return
  */
 void *first_fit(size_t size) {
+#ifdef DEBUG
+    printf("[DEBUG] in first_fit(), size = %d\n", size);
+#endif
+
     void *p, *ret;
 
     p = heap_listp;
@@ -196,16 +200,26 @@ void *coalesce(void *bp) {
     size = RB_SIZE(bp);
     p = bp;
 
-    if (!NEXT_BLK_ALLOC(bp)) {
+    if (NEXT_BLK_ALLOC(bp) == BLK_FREE) {
+#ifdef DEBUG
+        printf("[DEBUG] coalescing next block: 0x%x, size: %d\n", NEXT_BLKP(bp), NEXT_BLK_SIZE(bp));
+#endif
         size += NEXT_BLK_SIZE(bp);
     }
 
-    if (!PREV_BLK_ALLOC(bp)) {
+    if (PREV_BLK_ALLOC(bp) == BLK_FREE) {
+#ifdef DEBUG
+        printf("[DEBUG] coalescing prev block: 0x%x, size: %d\n", PREV_BLKP(bp), PREV_BLK_SIZE(bp));
+#endif
         size += PREV_BLK_SIZE(bp);
         p = PREV_BLKP(bp);
     }
 
     SET_RB(p, size, BLK_FREE);
+
+#ifdef DUMP_HEAP
+    dump("coalesce", 0);
+#endif
     return p;
 }
 
@@ -217,6 +231,10 @@ void *coalesce(void *bp) {
  * @return the address of free memory, or NULL if failed
  */
 void *extend_heap(int size) {
+#ifdef DEBUG
+    printf("[DEBUG] in extend_heap(), size = %d\n", size);
+#endif
+
     void *old_brk;
 
     if (size == 0) {
@@ -233,7 +251,7 @@ void *extend_heap(int size) {
         return NULL;
     }
 
-    SET_RB(old_brk, size, BLK_ALLOC);
+    SET_RB(old_brk, size, BLK_FREE);
     SET_EB(NEXT_BLKP(old_brk));
 
     return coalesce(old_brk);
@@ -267,7 +285,7 @@ int implicit_mm_init(void) {
  * @return
  */
 void *implicit_mm_malloc(size_t size) {
-    size_t asize;
+    size_t asize, tsize;
     void *p;
 
     if (size == 0) {
@@ -278,13 +296,20 @@ void *implicit_mm_malloc(size_t size) {
 
     /* try to find a free block */
     if ((p = find_fit(asize)) != NULL) {
+#ifdef DUMP_HEAP
+        dump("alloc", asize);
+#endif
         return p;
     }
 
     /* no fitting block, try to extend the heap */
-    if ((p = extend_heap(asize)) != NULL) {
+    tsize = asize + RB_HDR_SIZE + RB_FTR_SIZE;
+    if ((p = extend_heap(tsize)) != NULL) {
         /* and then try to place it at the new extended memory */
         if ((p = place(p, asize)) != NULL) {
+#ifdef DUMP_HEAP
+            dump("alloc", asize);
+#endif
             return p;
         }
     }
@@ -298,6 +323,9 @@ void *implicit_mm_malloc(size_t size) {
  */
 void implicit_mm_free(void *ptr) {
     SET_RB(ptr, RB_SIZE(ptr), BLK_FREE);
+#ifdef DUMP_HEAP
+    dump("free", RB_SIZE(ptr));
+#endif
     coalesce(ptr);
 }
 
@@ -308,5 +336,29 @@ void implicit_mm_free(void *ptr) {
  * @return
  */
 void *implicit_mm_realloc(void *ptr, size_t size) {
+    fprintf(stderr, "ERROR: mplicit_mm_realloc not finished yet!\n");
     return NULL;
+}
+
+
+/******************************************
+ * heap dumper
+ ******************************************/
+void dump(char *msg, size_t size) {
+    void *s;
+
+    s = heap_listp;
+
+    printf("\n");
+    printf("after %s %d(0x%x) memory:\n", msg, size, size);
+    printf("==========================================\n");
+    while (s != NULL && !EB(s)) {
+        printf("%d\t", RB_ALLOC(s));
+        printf("%8d(%8x)\t", RB_SIZE(s), RB_SIZE(s));
+        printf("0x%x --- ", s);
+        printf("0x%x\n", s + RB_SIZE(s) - 1);
+
+        s = NEXT_BLKP(s);
+    }
+    printf("==========================================\n");
 }

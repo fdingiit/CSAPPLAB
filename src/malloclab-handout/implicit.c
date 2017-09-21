@@ -254,7 +254,7 @@ void *extend_heap(int size) {
     SET_RB(old_brk, size, BLK_FREE);
     SET_EB(NEXT_BLKP(old_brk));
 
-    return coalesce(old_brk);
+    return old_brk;
 }
 
 /******************************************
@@ -285,8 +285,8 @@ int implicit_mm_init(void) {
  * @return
  */
 void *implicit_mm_malloc(size_t size) {
-    size_t asize, tsize;
-    void *p;
+    size_t asize, tsize, pasize;
+    void *cur, *tail, *prev;
 
     if (size == 0) {
         return NULL;
@@ -295,26 +295,43 @@ void *implicit_mm_malloc(size_t size) {
     asize = ALIGN(size);
 
     /* try to find a free block */
-    if ((p = find_fit(asize)) != NULL) {
+    if ((cur = find_fit(asize)) != NULL) {
 #ifdef DUMP_HEAP
         dump("alloc", asize);
 #endif
-        return p;
+        return cur;
     }
 
-    /* no fitting block, try to extend the heap */
-    tsize = asize + RB_HDR_SIZE + RB_FTR_SIZE;
-    if ((p = extend_heap(tsize)) != NULL) {
-        /* and then try to place it at the new extended memory */
-        if ((p = place(p, asize)) != NULL) {
-#ifdef DUMP_HEAP
-            dump("alloc", asize);
-#endif
-            return p;
+    /* no fitting block, try to extend the heap
+     * wish we have free block at the tail of the heap that can be use
+     * or we have to alloc a totally new block for it */
+    tail = mem_sbrk(0);
+    if (PREV_BLK_ALLOC(tail) == BLK_FREE) {
+        prev = PREV_BLKP(tail);
+        pasize = RB_AVL_SIZE(prev);     /* prev available memory size */
+        tsize = asize - pasize;          /* we need to alloc */
+
+        if (extend_heap(tsize) == NULL) {
+            return NULL;
         }
+
+        SET_RB(prev, RB_SIZE(prev) + tsize, BLK_ALLOC);
+        cur = prev;
+    } else {
+        tsize = asize + RB_HDR_SIZE + RB_FTR_SIZE;
+
+        if ((cur = extend_heap(tsize)) == NULL) {
+            return NULL;
+        }
+
+        /* and then try to place it at the new extended memory */
+        SET_RB(cur, tsize, BLK_ALLOC);
     }
 
-    return NULL;
+#ifdef DUMP_HEAP
+    dump("alloc", asize);
+#endif
+    return cur;
 }
 
 /**

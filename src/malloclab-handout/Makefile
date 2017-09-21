@@ -5,21 +5,28 @@
 ALLOCATOR =
 STRATEGY = USE_IMPLICIT
 FIT = USE_FIRST_FIT
-DUMP = 0
+
 DEBUG = 0
+DUMP = 0
+
+PROFILE = 0
 
 CC = clang
 CFLAGS = -Wall -m32
 
 ifeq ($(DEBUG), 1)
 	CFLAGS += -O0 -ggdb3 -DDEBUG
-endif
 
-ifeq ($(DUMP), 1)
-	CFLAGS += -DDUMP_HEAP
+	ifeq ($(DUMP), 1)
+    	CFLAGS += -DDUMP_HEAP
+    endif
 endif
 
 CFLAGS += -D$(STRATEGY) -D$(FIT)
+
+ifeq ($(PROFILE), 1)
+	CFLAGS += -pg
+endif
 
 ifeq ($(STRATEGY), USE_IMPLICIT)
 	ALLOCATOR=implicit

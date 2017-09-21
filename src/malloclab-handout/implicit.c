@@ -367,13 +367,13 @@ void dump(char *msg, size_t size) {
     s = heap_listp;
 
     printf("\n");
-    printf("after %s %d(0x%x) memory:\n", msg, size, size);
+    printf("after %s %d(0x%x) memory:\n", msg, (int)size, (uint)size);
     printf("==========================================\n");
     while (s != NULL && !EB(s)) {
         printf("%d\t", RB_ALLOC(s));
         printf("%8d(%8x)\t", RB_SIZE(s), RB_SIZE(s));
-        printf("0x%x --- ", s);
-        printf("0x%x\n", s + RB_SIZE(s) - 1);
+        printf("%p --- ", s);
+        printf("%p\n", s + RB_SIZE(s) - 1);
 
         s = NEXT_BLKP(s);
     }

@@ -6,13 +6,13 @@ ALLOCATOR =
 STRATEGY = USE_IMPLICIT
 FIT = USE_FIRST_FIT
 
-DEBUG = 1
+DEBUG = 0
 DUMP = 1
 
 PROFILE = 0
 
 CC = clang
-CFLAGS = -Wall -m32
+CFLAGS = -Wall
 
 ifeq ($(DEBUG), 1)
 	CFLAGS += -O0 -ggdb3 -DDEBUG

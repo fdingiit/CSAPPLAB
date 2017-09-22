@@ -72,7 +72,6 @@ typedef struct {
 typedef struct {
     trace_t *trace;
     range_t *ranges;
-    char *tracefile;
 } speed_t;
 
 /* Summarizes the important stats for some malloc function on some trace */
@@ -121,6 +120,8 @@ static trace_t *read_trace(char *tracedir, char *filename);
 
 static void free_trace(trace_t *trace);
 
+static void clean_trace(trace_t *trace);
+
 /* Routines for evaluating the correctness and speed of libc malloc */
 static int eval_libc_valid(trace_t *trace, int tracenum);
 
@@ -155,8 +156,7 @@ int main(int argc, char **argv) {
     char c;
     char **tracefiles = NULL;  /* null-terminated array of trace file names */
     int num_tracefiles = 0;    /* the number of traces in that array */
-    trace_t *trace = NULL;     /* stores a trace file for correctness check */
-    trace_t *trace2 = NULL;     /* stores a trace file for efficiency check */
+    trace_t *trace = NULL;     /* stores a trace file for check */
     range_t *ranges = NULL;    /* keeps track of block extents for one trace */
     stats_t *libc_stats = NULL;/* libc stats for each trace */
     stats_t *mm_stats = NULL;  /* mm (i.e. student) stats for each trace */
@@ -310,16 +310,15 @@ int main(int argc, char **argv) {
         if (mm_stats[i].valid) {
             if (verbose > 1)
                 printf("efficiency, ");
-            trace2 = read_trace(tracedir, tracefiles[i]);
-            mm_stats[i].util = eval_mm_util(trace2, i, &ranges);
-            speed_params.tracefile = tracefiles[i];
+            clean_trace(trace);
+            mm_stats[i].util = eval_mm_util(trace, i, &ranges);
             speed_params.ranges = ranges;
+            speed_params.trace = trace;
             if (verbose > 1)
                 printf("and performance.\n");
             mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params);
         }
         free_trace(trace);
-        free_trace(trace2);
         free_trace(speed_params.trace);
     }
 
@@ -575,6 +574,14 @@ void free_trace(trace_t *trace) {
     free(trace);              /* and the trace record itself... */
 }
 
+/*
+ * clean_trace - Clean trace
+ */
+void clean_trace(trace_t *trace) {
+    memset(trace->blocks, 0, (trace->num_ids * sizeof(char *)));
+    memset(trace->block_sizes, 0, (trace->num_ids * sizeof(size_t)));
+}
+
 /**********************************************************************
  * The following functions evaluate the correctness, space utilization,
  * and throughput of the libc and mm malloc packages.
@@ -792,8 +799,8 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges) {
 static void eval_mm_speed(void *ptr) {
     int i, index, size, newsize;
     char *p, *newp, *oldp, *block;
-    ((speed_t *) ptr)->trace = read_trace(tracedir, ((speed_t *) ptr)->tracefile);
     trace_t *trace = ((speed_t *) ptr)->trace;
+    clean_trace(trace);
 
     /* Reset the heap and initialize the mm package */
     mem_reset_brk();

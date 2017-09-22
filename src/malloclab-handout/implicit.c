@@ -1,15 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
-#include <unistd.h>
 #include <string.h>
 
 #include "implicit.h"
 #include "memlib.h"
 #include "utils.h"
 
-
-#define MIN_BLK_SIZE (RB_HDR_SIZE + RB_FTR_SIZE + ALIGNMENT)
+/* special block that has no free memory in fact,
+ * but it is also valuable, cuz this block may come from
+ * a split of a large block, which only left the room
+ * for block header and footer. if we need to alloc a free
+ * block just after this meaningless block, we could
+ * reuse the header and footer of it, which will
+ * make us save some bytes.
+ *
+ * NOTE: if a block has 0 byte, IT MUST BE MARKED AS FREE
+ * */
+#define MIN_BLK_SIZE    (RB_HDR_SIZE + RB_FTR_SIZE)
 
 #define BLK_FREE    0
 #define BLK_ALLOC   1
@@ -32,17 +39,17 @@
 /* epilogue block */
 #define EB_HDR_SIZE 4
 
-#define EB_HDRP(p) ((void*)(p) - EB_HDR_SIZE)   /* epilogue block header pointer */
-#define SET_EB(p) SET(EB_HDRP(p), PACK(0, 1))   /* set epilogue block */
-#define EB(p) (GET_SIZE(EB_HDRP(p)) == 0)       /* does p point to a epilogue block? */
+#define EB_HDRP(p)      ((void*)(p) - EB_HDR_SIZE)          /* epilogue block header pointer */
+#define SET_EB(p)       SET(EB_HDRP(p), PACK(0, 1))         /* set epilogue block */
+#define EB(p)           (GET_SIZE(EB_HDRP(p)) == 0)         /* does p point to a epilogue block? */
 
 /* regular block */
 #define RB_HDR_SIZE 4
 #define RB_FTR_SIZE 4
 
-#define RB_ALLOC(p) (GET_ALLOC(RB_HDRP(p)))     /* is the block alloced? */
-#define RB_SIZE(p) (GET_SIZE(RB_HDRP(p)))       /* total size of this block, including header and footer */
-#define RB_AVL_SIZE(p) (RB_SIZE(p) - RB_HDR_SIZE - RB_FTR_SIZE) /* available memory size */
+#define RB_ALLOC(p)     (GET_ALLOC(RB_HDRP(p)))                 /* is the block alloced? */
+#define RB_SIZE(p)      (GET_SIZE(RB_HDRP(p)))                  /* total size of this block, including header and footer */
+#define RB_AVL_SIZE(p)  (RB_SIZE(p) - RB_HDR_SIZE - RB_FTR_SIZE)    /* available memory size */
 
 #define RB_HDRP(p) ((void*)(p) - RB_HDR_SIZE)       /* regular block header pointer */
 #define RB_FTRP(p) ((void*)(p) + RB_AVL_SIZE(p))    /* regular block footer pointer */
@@ -202,14 +209,14 @@ void *coalesce(void *bp) {
 
     if (NEXT_BLK_ALLOC(bp) == BLK_FREE) {
 #ifdef DEBUG
-        printf("[DEBUG] coalescing next block: 0x%x, size: %d\n", NEXT_BLKP(bp), NEXT_BLK_SIZE(bp));
+        printf("[DEBUG] coalescing next block: %p, size: %d\n", NEXT_BLKP(bp), NEXT_BLK_SIZE(bp));
 #endif
         size += NEXT_BLK_SIZE(bp);
     }
 
     if (PREV_BLK_ALLOC(bp) == BLK_FREE) {
 #ifdef DEBUG
-        printf("[DEBUG] coalescing prev block: 0x%x, size: %d\n", PREV_BLKP(bp), PREV_BLK_SIZE(bp));
+        printf("[DEBUG] coalescing prev block: %p, size: %d\n", PREV_BLKP(bp), PREV_BLK_SIZE(bp));
 #endif
         size += PREV_BLK_SIZE(bp);
         p = PREV_BLKP(bp);
@@ -257,6 +264,51 @@ void *extend_heap(int size) {
     return old_brk;
 }
 
+/**
+ *
+ * @param size
+ * @param alloc
+ * @return
+ */
+void *do_malloc(size_t size, int alloc) {
+    void *tail, *prev, *cur;
+    size_t pasize, tsize;
+
+    /* if no fitting block, try to extend the heap
+     * wish we have free block at the tail of the heap that can be use
+     * or we have to alloc a totally new block for it */
+    tail = mem_sbrk(0);
+    if (PREV_BLK_ALLOC(tail) == BLK_FREE || alloc) {
+#ifdef DEBUG
+        printf("[DEBUG] in do_malloc(): reuse tail block: %d\n", alloc);
+#endif
+        prev = PREV_BLKP(tail);
+        pasize = RB_AVL_SIZE(prev);     /* prev available memory size */
+        tsize = size - pasize;          /* we need to alloc */
+
+        if (extend_heap(tsize) == NULL) {
+            return NULL;
+        }
+
+        SET_RB(prev, size + RB_HDR_SIZE + RB_FTR_SIZE, BLK_ALLOC);
+        cur = prev;
+    } else {
+        tsize = size + RB_HDR_SIZE + RB_FTR_SIZE;
+
+        if ((cur = extend_heap(tsize)) == NULL) {
+            return NULL;
+        }
+
+        /* and then try to place it at the new extended memory */
+        SET_RB(cur, tsize, BLK_ALLOC);
+    }
+
+#ifdef DUMP_HEAP
+    dump("alloc", size);
+#endif
+    return cur;
+}
+
 /******************************************
  * allocator open APIs
  ******************************************/
@@ -285,8 +337,8 @@ int implicit_mm_init(void) {
  * @return
  */
 void *implicit_mm_malloc(size_t size) {
-    size_t asize, tsize, pasize;
-    void *cur, *tail, *prev;
+    size_t asize;
+    void *cur;
 
     if (size == 0) {
         return NULL;
@@ -297,40 +349,13 @@ void *implicit_mm_malloc(size_t size) {
     /* try to find a free block */
     if ((cur = find_fit(asize)) != NULL) {
 #ifdef DUMP_HEAP
-        dump("alloc", asize);
+        dump("find fit", asize);
 #endif
         return cur;
     }
 
-    /* no fitting block, try to extend the heap
-     * wish we have free block at the tail of the heap that can be use
-     * or we have to alloc a totally new block for it */
-    tail = mem_sbrk(0);
-    if (PREV_BLK_ALLOC(tail) == BLK_FREE) {
-        prev = PREV_BLKP(tail);
-        pasize = RB_AVL_SIZE(prev);     /* prev available memory size */
-        tsize = asize - pasize;          /* we need to alloc */
+    cur = do_malloc(asize, BLK_FREE);
 
-        if (extend_heap(tsize) == NULL) {
-            return NULL;
-        }
-
-        SET_RB(prev, RB_SIZE(prev) + tsize, BLK_ALLOC);
-        cur = prev;
-    } else {
-        tsize = asize + RB_HDR_SIZE + RB_FTR_SIZE;
-
-        if ((cur = extend_heap(tsize)) == NULL) {
-            return NULL;
-        }
-
-        /* and then try to place it at the new extended memory */
-        SET_RB(cur, tsize, BLK_ALLOC);
-    }
-
-#ifdef DUMP_HEAP
-    dump("alloc", asize);
-#endif
     return cur;
 }
 
@@ -353,8 +378,104 @@ void implicit_mm_free(void *ptr) {
  * @return
  */
 void *implicit_mm_realloc(void *ptr, size_t size) {
-    fprintf(stderr, "ERROR: mplicit_mm_realloc not finished yet!\n");
-    return NULL;
+    void *hdrp, *ftrp, *split, *prep, *p;
+    size_t bsize, rsize, nsize;
+    int alloc;
+
+    /* equivalent to malloc */
+    if (ptr == NULL) {
+        return implicit_mm_malloc(size);
+    }
+
+    /* equivalent to free */
+    if (size == 0) {
+        implicit_mm_free(ptr);
+        return ptr;
+    }
+
+    /* 1. resize a free block is meaningless;
+     * 2. if we want to resize a block that is smaller than MIN_BLK_SIZE, that means we points to a wrong block;
+     * 3. if the block size if no aligned, something wrong;
+     * 4. if the header is not same with the footer, something wrong.
+     * */
+    hdrp = RB_HDRP(ptr);
+    ftrp = RB_FTRP(ptr);
+    if (hdrp == NULL || ftrp == NULL) {
+#ifdef DEBUG
+        printf("[DEBUG] in implicit_mm_realloc(): null header or footer\n");
+#endif
+        return NULL;
+    }
+
+    bsize = RB_SIZE(ptr), alloc = RB_ALLOC(ptr);
+    if (alloc == BLK_FREE || bsize <= MIN_BLK_SIZE || bsize % ALIGNMENT != 0 || GET(hdrp) != GET(ftrp)) {
+#ifdef DEBUG
+        printf("[DEBUG] in implicit_mm_realloc(): illegal realloc: %p, %d, %d, %d, %d, 0x%x, 0x%x\n",
+            ptr, size, alloc, bsize, bsize % ALIGNMENT, GET(hdrp), GET(ftrp));
+#endif
+        return NULL;
+    }
+
+    /* legal block indeed, try to resize */
+    nsize = ALIGN(size) + RB_HDR_SIZE + RB_FTR_SIZE;
+
+    /* same size with the origin block, do nothing */
+    if (nsize == bsize) {
+#ifdef DEBUG
+        printf("[DEBUG] in implicit_mm_realloc(): same size, return\n");
+#endif
+        return ptr;
+    }
+
+    /* smaller than the origin block, see if we must split it */
+    if (nsize < bsize) {
+        rsize = bsize - nsize;
+
+        /* need to split */
+        if (rsize >= MIN_BLK_SIZE) {
+            SET_RB(ptr, nsize, BLK_ALLOC);
+            split = NEXT_BLKP(ptr);
+            SET_RB(split, rsize, BLK_FREE);
+#ifdef DUMP_HEAP
+            dump("split", nsize);
+#endif
+        }
+
+        return ptr;
+    }
+
+    /* larger than the origin block, see if we have enough
+     * free space just after/before it, or we must alloc+copy+free */
+
+    /* check after */
+    if ((NEXT_BLK_ALLOC(ptr) == BLK_FREE) && (nsize <= bsize + NEXT_BLK_SIZE(ptr))) {
+        SET_RB(ptr, nsize, BLK_ALLOC);
+        return ptr;
+    }
+
+    /* check previous */
+    prep = PREV_BLKP(ptr);
+    if ((PREV_BLK_ALLOC(ptr) == BLK_FREE) && (nsize <= bsize + PREV_BLK_SIZE(ptr))) {
+        SET_RB(prep, nsize, BLK_ALLOC);
+        memcpy(prep, ptr, RB_AVL_SIZE(ptr));
+        return ptr;
+    }
+
+    /* 1. alloc new memory
+     * 2. copy
+     * 3. free old if needed
+     * */
+    p = do_malloc(ALIGN(size), BLK_ALLOC);
+    SET_RB(p, nsize, BLK_ALLOC);
+    memcpy(p, ptr, RB_AVL_SIZE(ptr));
+    if (p != ptr) {
+        implicit_mm_free(ptr);
+    }
+
+#ifdef  DUMP_HEAP
+    dump("realloc", size);
+#endif
+    return p;
 }
 
 
@@ -367,15 +488,16 @@ void dump(char *msg, size_t size) {
     s = heap_listp;
 
     printf("\n");
-    printf("after %s %d(0x%x) memory:\n", msg, (int)size, (uint)size);
-    printf("==========================================\n");
+    printf("after %s %d(0x%x) memory:\n", msg, (int) size, (uint) size);
+    printf("==========================================================================================\n");
     while (s != NULL && !EB(s)) {
-        printf("%d\t", RB_ALLOC(s));
+        printf("%s\t", RB_ALLOC(s) ? "alloc" : "free");
         printf("%8d(%8x)\t", RB_SIZE(s), RB_SIZE(s));
         printf("%p --- ", s);
-        printf("%p\n", s + RB_SIZE(s) - 1);
+        printf("%p\t", s + RB_SIZE(s) - 1);
+        printf("%8x\t%8x\n", GET(RB_HDRP(s)), GET(RB_FTRP(s)));
 
         s = NEXT_BLKP(s);
     }
-    printf("==========================================\n");
+    printf("==========================================================================================\n");
 }

@@ -72,6 +72,7 @@ typedef struct {
 typedef struct {
     trace_t *trace;
     range_t *ranges;
+    char *tracefile;
 } speed_t;
 
 /* Summarizes the important stats for some malloc function on some trace */
@@ -142,6 +143,8 @@ static void unix_error(char *msg);
 
 static void malloc_error(int tracenum, int opnum, char *msg);
 
+static void realloc_error(int tracenum, int opnum, char *msg);
+
 static void app_error(char *msg);
 
 /**************
@@ -152,7 +155,8 @@ int main(int argc, char **argv) {
     char c;
     char **tracefiles = NULL;  /* null-terminated array of trace file names */
     int num_tracefiles = 0;    /* the number of traces in that array */
-    trace_t *trace = NULL;     /* stores a single trace file in memory */
+    trace_t *trace = NULL;     /* stores a trace file for correctness check */
+    trace_t *trace2 = NULL;     /* stores a trace file for efficiency check */
     range_t *ranges = NULL;    /* keeps track of block extents for one trace */
     stats_t *libc_stats = NULL;/* libc stats for each trace */
     stats_t *mm_stats = NULL;  /* mm (i.e. student) stats for each trace */
@@ -306,14 +310,17 @@ int main(int argc, char **argv) {
         if (mm_stats[i].valid) {
             if (verbose > 1)
                 printf("efficiency, ");
-            mm_stats[i].util = eval_mm_util(trace, i, &ranges);
-            speed_params.trace = trace;
+            trace2 = read_trace(tracedir, tracefiles[i]);
+            mm_stats[i].util = eval_mm_util(trace2, i, &ranges);
+            speed_params.tracefile = tracefiles[i];
             speed_params.ranges = ranges;
             if (verbose > 1)
                 printf("and performance.\n");
             mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params);
         }
         free_trace(trace);
+        free_trace(trace2);
+        free_trace(speed_params.trace);
     }
 
     /* Display the mm results in a compact table */
@@ -391,7 +398,7 @@ static int add_range(range_t **ranges, char *lo, int size,
     range_t *p;
     char msg[MAXLINE];
 
-    assert(size > 0);
+    assert(size >= 0);
 
     /* Payload addresses must be ALIGNMENT-byte aligned */
     if (!IS_ALIGNED(lo)) {
@@ -505,17 +512,17 @@ static trace_t *read_trace(char *tracedir, char *filename) {
 
     /* We'll store each request line in the trace in this array */
     if ((trace->ops =
-                 (traceop_t *) malloc(trace->num_ops * sizeof(traceop_t))) == NULL)
+                 (traceop_t *) calloc(trace->num_ops, sizeof(traceop_t))) == NULL)
         unix_error("malloc 2 failed in read_trace");
 
     /* We'll keep an array of pointers to the allocated blocks here... */
     if ((trace->blocks =
-                 (char **) malloc(trace->num_ids * sizeof(char *))) == NULL)
+                 (char **) calloc(trace->num_ids, sizeof(char *))) == NULL)
         unix_error("malloc 3 failed in read_trace");
 
     /* ... along with the corresponding byte sizes of each block */
     if ((trace->block_sizes =
-                 (size_t *) malloc(trace->num_ids * sizeof(size_t))) == NULL)
+                 (size_t *) calloc(trace->num_ids, sizeof(size_t))) == NULL)
         unix_error("malloc 4 failed in read_trace");
 
     /* read every request line in the trace file */
@@ -740,7 +747,7 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges) {
 
                 oldp = trace->blocks[index];
                 if ((newp = mm_realloc(oldp, newsize)) == NULL)
-                    app_error("mm_realloc failed in eval_mm_util");
+                    realloc_error(tracenum, i, "mm_realloc failed in eval_mm_util");
 
                 /* Remember region and size */
                 trace->blocks[index] = newp;
@@ -785,6 +792,7 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges) {
 static void eval_mm_speed(void *ptr) {
     int i, index, size, newsize;
     char *p, *newp, *oldp, *block;
+    ((speed_t *) ptr)->trace = read_trace(tracedir, ((speed_t *) ptr)->tracefile);
     trace_t *trace = ((speed_t *) ptr)->trace;
 
     /* Reset the heap and initialize the mm package */
@@ -809,7 +817,7 @@ static void eval_mm_speed(void *ptr) {
                 newsize = trace->ops[i].size;
                 oldp = trace->blocks[index];
                 if ((newp = mm_realloc(oldp, newsize)) == NULL)
-                    app_error("mm_realloc error in eval_mm_speed");
+                    realloc_error(-1, i, "mm_realloc error in eval_mm_speed");
                 trace->blocks[index] = newp;
                 break;
 
@@ -988,6 +996,15 @@ void unix_error(char *msg) {
 void malloc_error(int tracenum, int opnum, char *msg) {
     errors++;
     printf("ERROR [trace %d, line %d]: %s\n", tracenum, LINENUM(opnum), msg);
+}
+
+/*
+ * realloc_error - Report an error returned by the mm_malloc package
+ */
+void realloc_error(int tracenum, int opnum, char *msg) {
+    errors++;
+    printf("ERROR [trace %d, line %d]: %s\n", tracenum, LINENUM(opnum), msg);
+    exit(1);
 }
 
 /* 

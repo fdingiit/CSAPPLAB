@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
     double secs, ops, util, avg_mm_util, avg_mm_throughput, p1, p2, perfindex;
     int numcorrect;
 
-    ftimer_test_exclude not = (void (*)(void*))(&clean_trace);
+    ftimer_test_exclude clean_up = (void (*)(void*))(&clean_trace);     /* clean trace each time */
 
     /* 
      * Read and interpret the command line arguments 
@@ -276,7 +276,7 @@ int main(int argc, char **argv) {
                 speed_params.trace = trace;
                 if (verbose > 1)
                     printf("and performance.\n");
-                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params, not, trace);
+                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params, clean_up, trace);
             }
             free_trace(trace);
         }
@@ -318,7 +318,7 @@ int main(int argc, char **argv) {
             speed_params.trace = trace;
             if (verbose > 1)
                 printf("and performance.\n");
-            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params, not, trace);
+            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params, clean_up, trace);
         }
         free_trace(trace);
     }
@@ -576,7 +576,7 @@ void free_trace(trace_t *trace) {
 }
 
 /*
- * clean_trace - Clean trace
+ * clean_trace - Clean trace content
  */
 void clean_trace(trace_t *trace) {
     memset(trace->blocks, 0, (trace->num_ids * sizeof(char *)));

@@ -41,14 +41,14 @@ void init_fsecs(void) {
 /*
  * fsecs - Return the running time of a function f (in seconds)
  */
-double fsecs(fsecs_test_funct f, void *argp, ftimer_test_exclude not, void *argpp) {
+double fsecs(fsecs_test_funct f, void *argp, ftimer_test_exclude g, void *argpp) {
 #if USE_FCYC
     double cycles = fcyc(f, argp);
     return cycles/(Mhz*1e6);
 #elif USE_ITIMER
     return ftimer_itimer(f, argp, 10);
 #elif USE_GETTOD
-    return ftimer_gettod(f, argp, not, argpp, 10);
+    return ftimer_gettod(f, argp, g, argpp, 10);
 #endif
 }
 

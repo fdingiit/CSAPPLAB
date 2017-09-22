@@ -37,16 +37,18 @@ double ftimer_itimer(ftimer_test_funct f, void *argp, int n) {
  * ftimer_gettod - Use gettimeofday to estimate the running time of
  * f(argp). Return the average of n runs.  
  */
-double ftimer_gettod(ftimer_test_funct f, void *argp, int n) {
+double ftimer_gettod(ftimer_test_funct f, void *argp, ftimer_test_exclude not, void *argpp, int n) {
     int i;
     struct timeval stv, etv;
-    double diff;
+    double diff = 0.0;
 
-    gettimeofday(&stv, NULL);
-    for (i = 0; i < n; i++)
+    for (i = 0; i < n; i++) {
+        gettimeofday(&stv, NULL);
         f(argp);
-    gettimeofday(&etv, NULL);
-    diff = 1E3 * (etv.tv_sec - stv.tv_sec) + 1E-3 * (etv.tv_usec - stv.tv_usec);
+        gettimeofday(&etv, NULL);
+        diff += 1E3 * (etv.tv_sec - stv.tv_sec) + 1E-3 * (etv.tv_usec - stv.tv_usec);
+        not(argpp);
+    }
     diff /= n;
     return (1E-3 * diff);
 }

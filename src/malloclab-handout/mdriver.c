@@ -170,6 +170,8 @@ int main(int argc, char **argv) {
     double secs, ops, util, avg_mm_util, avg_mm_throughput, p1, p2, perfindex;
     int numcorrect;
 
+    ftimer_test_exclude not = (void (*)(void*))(&clean_trace);
+
     /* 
      * Read and interpret the command line arguments 
      */
@@ -274,7 +276,7 @@ int main(int argc, char **argv) {
                 speed_params.trace = trace;
                 if (verbose > 1)
                     printf("and performance.\n");
-                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params);
+                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params, not, trace);
             }
             free_trace(trace);
         }
@@ -316,10 +318,9 @@ int main(int argc, char **argv) {
             speed_params.trace = trace;
             if (verbose > 1)
                 printf("and performance.\n");
-            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params);
+            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params, not, trace);
         }
         free_trace(trace);
-        free_trace(speed_params.trace);
     }
 
     /* Display the mm results in a compact table */

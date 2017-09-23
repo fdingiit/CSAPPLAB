@@ -120,7 +120,7 @@ static trace_t *read_trace(char *tracedir, char *filename);
 
 static void free_trace(trace_t *trace);
 
-static void clean_trace(trace_t *trace);
+static void clean_up(trace_t *trace);
 
 /* Routines for evaluating the correctness and speed of libc malloc */
 static int eval_libc_valid(trace_t *trace, int tracenum);
@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
     double secs, ops, util, avg_mm_util, avg_mm_throughput, p1, p2, perfindex;
     int numcorrect;
 
-    ftimer_test_exclude clean_up = (void (*)(void*))(&clean_trace);     /* clean trace each time */
+    ftimer_test_exclude clean = (void (*)(void*))(&clean_up);     /* clean trace each time */
 
     /* 
      * Read and interpret the command line arguments 
@@ -276,7 +276,7 @@ int main(int argc, char **argv) {
                 speed_params.trace = trace;
                 if (verbose > 1)
                     printf("and performance.\n");
-                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params, clean_up, trace);
+                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params, clean, trace);
             }
             free_trace(trace);
         }
@@ -312,13 +312,13 @@ int main(int argc, char **argv) {
         if (mm_stats[i].valid) {
             if (verbose > 1)
                 printf("efficiency, ");
-            clean_trace(trace);
+            clean(trace);
             mm_stats[i].util = eval_mm_util(trace, i, &ranges);
             speed_params.ranges = ranges;
             speed_params.trace = trace;
             if (verbose > 1)
                 printf("and performance.\n");
-            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params, clean_up, trace);
+            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params, clean, trace);
         }
         free_trace(trace);
     }
@@ -447,12 +447,10 @@ static int add_range(range_t **ranges, char *lo, int size,
 static void remove_range(range_t **ranges, char *lo) {
     range_t *p;
     range_t **prevpp = ranges;
-    int size;
 
     for (p = *ranges; p != NULL; p = p->next) {
         if (p->lo == lo) {
             *prevpp = p->next;
-            size = p->hi - p->lo + 1;
             free(p);
             break;
         }
@@ -578,7 +576,8 @@ void free_trace(trace_t *trace) {
 /*
  * clean_trace - Clean trace content
  */
-void clean_trace(trace_t *trace) {
+void clean_up(trace_t *trace) {
+    mem_clear();
     memset(trace->blocks, 0, (trace->num_ids * sizeof(char *)));
     memset(trace->block_sizes, 0, (trace->num_ids * sizeof(size_t)));
 }
@@ -615,6 +614,9 @@ static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges) {
         index = trace->ops[i].index;
         size = trace->ops[i].size;
 
+#ifdef DEBUG
+        printf("[MDRIVER] in eval_mm_valid(): index=%d, size=0x%x\n", index, size);
+#endif
         switch (trace->ops[i].type) {
 
             case ALLOC: /* mm_malloc */
@@ -721,7 +723,6 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges) {
     char *newp, *oldp;
 
     /* initialize the heap and the mm malloc package */
-    mem_reset_brk();
     if (mm_init() < 0)
         app_error("mm_init failed in eval_mm_util");
 
@@ -801,10 +802,8 @@ static void eval_mm_speed(void *ptr) {
     int i, index, size, newsize;
     char *p, *newp, *oldp, *block;
     trace_t *trace = ((speed_t *) ptr)->trace;
-    clean_trace(trace);
 
     /* Reset the heap and initialize the mm package */
-    mem_reset_brk();
     if (mm_init() < 0)
         app_error("mm_init failed in eval_mm_speed");
 

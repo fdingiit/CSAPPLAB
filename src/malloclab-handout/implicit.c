@@ -127,14 +127,16 @@ void *place(void *bp, size_t size) {
  */
 void *first_fit(size_t size) {
 #ifdef DEBUG
-    printf("[DEBUG] in first_fit(), size = %d\n", size);
+    printf("[DEBUG] in first_fit(), size = %ld\n", size);
 #endif
 
     void *p, *ret;
 
     p = heap_listp;
     while (!EB(p)) {
-        /* try to find a block that big enough */
+        /* try to find a block that big enough
+         * according to gprof, this is the most time-consuming
+         * code, cuz time:O(n) of this function for each hit */
         if (RB_ALLOC(p) == BLK_FREE && RB_AVL_SIZE(p) >= size) {
             if ((ret = place(p, size)) != NULL) {
                 return ret;
@@ -258,7 +260,6 @@ void *extend_heap(int size) {
         return NULL;
     }
 
-    SET_RB(old_brk, size, BLK_FREE);
     SET_EB(NEXT_BLKP(old_brk));
 
     return old_brk;
@@ -266,47 +267,48 @@ void *extend_heap(int size) {
 
 /**
  *
- * @param size
- * @param alloc
+ * @param size not contain header and footer
+ * @param tail
  * @return
  */
-void *do_malloc(size_t size, int alloc) {
-    void *tail, *prev, *cur;
+void *do_malloc(size_t size, int tail) {
+    void *tailp, *curp;
     size_t pasize, tsize;
+
+    size = ALIGN(size);
 
     /* if no fitting block, try to extend the heap
      * wish we have free block at the tail of the heap that can be use
      * or we have to alloc a totally new block for it */
-    tail = mem_sbrk(0);
-    if (PREV_BLK_ALLOC(tail) == BLK_FREE || alloc) {
+    tailp = PREV_BLKP(mem_sbrk(0));
+    if (RB_ALLOC(tailp) == BLK_FREE || tail) {
 #ifdef DEBUG
-        printf("[DEBUG] in do_malloc(): reuse tail block: %d\n", alloc);
+        printf("[DEBUG] in do_malloc(): reuse tail block\n");
 #endif
-        prev = PREV_BLKP(tail);
-        pasize = RB_AVL_SIZE(prev);     /* prev available memory size */
-        tsize = size - pasize;          /* we need to alloc */
+        pasize = RB_AVL_SIZE(tailp);        /* prev available memory size */
+        tsize = size - pasize;              /* we need to alloc */
 
         if (extend_heap(tsize) == NULL) {
             return NULL;
         }
 
-        SET_RB(prev, size + RB_HDR_SIZE + RB_FTR_SIZE, BLK_ALLOC);
-        cur = prev;
+        curp = tailp;
     } else {
         tsize = size + RB_HDR_SIZE + RB_FTR_SIZE;
 
-        if ((cur = extend_heap(tsize)) == NULL) {
+        if ((curp = extend_heap(tsize)) == NULL) {
             return NULL;
         }
 
         /* and then try to place it at the new extended memory */
-        SET_RB(cur, tsize, BLK_ALLOC);
     }
+
+    SET_RB(curp, size + RB_HDR_SIZE + RB_FTR_SIZE, BLK_ALLOC);
 
 #ifdef DUMP_HEAP
     dump("alloc", size);
 #endif
-    return cur;
+    return curp;
 }
 
 /******************************************
@@ -354,7 +356,7 @@ void *implicit_mm_malloc(size_t size) {
         return cur;
     }
 
-    cur = do_malloc(asize, BLK_FREE);
+    cur = do_malloc(asize, 0);
 
     return cur;
 }
@@ -410,7 +412,7 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
     bsize = RB_SIZE(ptr), alloc = RB_ALLOC(ptr);
     if (alloc == BLK_FREE || bsize <= MIN_BLK_SIZE || bsize % ALIGNMENT != 0 || GET(hdrp) != GET(ftrp)) {
 #ifdef DEBUG
-        printf("[DEBUG] in implicit_mm_realloc(): illegal realloc: %p, %d, %d, %d, %d, 0x%x, 0x%x\n",
+        printf("[DEBUG] in implicit_mm_realloc(): illegal realloc: %p, %ld, %d, %ld, %ld, 0x%x, 0x%x\n",
             ptr, size, alloc, bsize, bsize % ALIGNMENT, GET(hdrp), GET(ftrp));
 #endif
         return NULL;
@@ -462,15 +464,25 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
     }
 
     /* 1. alloc new memory
-     * 2. copy
+     *    if ptr points to the tail block, then we can just alloc a smaller block
+     *    than the whole size
+     * 2. copy if needed
      * 3. free old if needed
      * */
-    p = do_malloc(ALIGN(size), BLK_ALLOC);
-    SET_RB(p, nsize, BLK_ALLOC);
-    memcpy(p, ptr, RB_AVL_SIZE(ptr));
-    if (p != ptr) {
+    if (EB(NEXT_BLKP(ptr))) {
+        /* tail block */
+        if ((p = do_malloc((ALIGN(size)), 1)) == NULL) {
+            return NULL;
+        }
+    } else {
+        /* totally new block */
+        if ((p = do_malloc(ALIGN(size), 0)) == NULL) {
+            return NULL;
+        }
+        memcpy(p, ptr, RB_AVL_SIZE(ptr));
         implicit_mm_free(ptr);
     }
+    SET_RB(p, nsize, BLK_ALLOC);
 
 #ifdef  DUMP_HEAP
     dump("realloc", size);

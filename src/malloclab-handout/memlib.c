@@ -33,6 +33,14 @@ void mem_init(void) {
     mem_brk = mem_start_brk;                  /* heap is empty initially */
 }
 
+/*
+ * mem_clean - clean the memory system model
+ */
+void mem_clear(void) {
+    memset(mem_start_brk, 0, MAX_HEAP);
+    mem_reset_brk();
+}
+
 /* 
  * mem_deinit - free the storage used by the memory system model
  */

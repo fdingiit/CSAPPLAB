@@ -1,6 +1,7 @@
 #include <unistd.h>
 
-void mem_init(void);               
+void mem_init(void);
+void mem_clear(void);
 void mem_deinit(void);
 void *mem_sbrk(int incr);
 void mem_reset_brk(void); 

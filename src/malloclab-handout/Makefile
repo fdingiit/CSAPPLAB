@@ -11,7 +11,7 @@ DUMP = 1
 
 PROFILE = 0
 
-CC = clang
+CC = gcc
 CFLAGS = -Wall
 
 ifeq ($(DEBUG), 1)

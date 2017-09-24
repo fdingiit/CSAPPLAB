@@ -318,6 +318,7 @@ int main(int argc, char **argv) {
             speed_params.trace = trace;
             if (verbose > 1)
                 printf("and performance.\n");
+            clean(trace);
             mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params, clean, trace);
         }
         free_trace(trace);

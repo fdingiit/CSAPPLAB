@@ -381,7 +381,7 @@ void implicit_mm_free(void *ptr) {
  */
 void *implicit_mm_realloc(void *ptr, size_t size) {
     void *hdrp, *ftrp, *split, *prep, *p;
-    size_t bsize, rsize, nsize;
+    size_t bsize, rsize, nsize, fsize;
     int alloc;
 
     /* equivalent to malloc */
@@ -446,21 +446,37 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
         return ptr;
     }
 
-    /* larger than the origin block, see if we have enough
-     * free space just after/before it, or we must alloc+copy+free */
+    /* larger than the origin block,
+     * see if we can use any free block */
 
     /* check after */
-    if ((NEXT_BLK_ALLOC(ptr) == BLK_FREE) && (nsize <= bsize + NEXT_BLK_SIZE(ptr))) {
+    fsize = NEXT_BLK_SIZE(ptr);
+    if ((NEXT_BLK_ALLOC(ptr) == BLK_FREE) && (nsize <= bsize + fsize)) {
+        fsize -= (nsize - bsize);
         SET_RB(ptr, nsize, BLK_ALLOC);
+        if (fsize >= MIN_BLK_SIZE) {
+            SET_RB(NEXT_BLKP(ptr), fsize, BLK_FREE);
+        }
+#ifdef  DUMP_HEAP
+        dump("realloc", size);
+#endif
         return ptr;
     }
 
     /* check previous */
     prep = PREV_BLKP(ptr);
-    if ((PREV_BLK_ALLOC(ptr) == BLK_FREE) && (nsize <= bsize + PREV_BLK_SIZE(ptr))) {
-        SET_RB(prep, nsize, BLK_ALLOC);
+    fsize = RB_SIZE(prep);
+    if ((RB_ALLOC(prep) == BLK_FREE) && (nsize <= bsize + fsize)) {
+        fsize -= (nsize - bsize);
         memcpy(prep, ptr, RB_AVL_SIZE(ptr));
-        return ptr;
+        SET_RB(prep, nsize, BLK_ALLOC);
+        if (fsize >= MIN_BLK_SIZE) {
+            SET_RB(NEXT_BLKP(prep), fsize, BLK_FREE);
+        }
+#ifdef  DUMP_HEAP
+        dump("realloc", size);
+#endif
+        return prep;
     }
 
     /* 1. alloc new memory

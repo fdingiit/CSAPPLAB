@@ -8,7 +8,6 @@ FIT = USE_FIRST_FIT
 
 DEBUG = 0
 DUMP = 1
-
 PROFILE = 0
 
 CC = gcc

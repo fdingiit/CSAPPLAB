@@ -3,6 +3,28 @@
 ---
 2017-9-25
 
+Implicit allocator with best-fit placement policy finished:
+
+```
+Results for mm malloc:
+trace  valid  util     ops      secs  Kops
+ 0       yes   99%    5694  0.011192   509
+ 1       yes  100%    5848  0.010927   535
+ 2       yes   99%    6648  0.016786   396
+ 3       yes  100%    5380  0.012604   427
+ 4       yes  100%   14400  0.000314 45904
+ 5       yes   96%    4800  0.017970   267
+ 6       yes   95%    4800  0.018027   266
+ 7       yes   55%    6000  0.034815   172
+ 8       yes   51%    7200  0.032239   223
+ 9       yes  100%   14401  0.000384 37473
+10       yes   87%   14401  0.000378 38048
+Total          89%   89572  0.155639   576
+
+Perf index = 54 (util) + 38 (thru) = 92/100
+```
+
+
 Implicit allocator with next-fit placement policy finished:
 
 ```

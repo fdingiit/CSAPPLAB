@@ -6,6 +6,8 @@
 #include "memlib.h"
 #include "utils.h"
 
+#include "config.h"
+
 /* special block that has no free memory in fact,
  * but it is also valuable, cuz this block may come from
  * a split of a large block, which only left the room
@@ -131,7 +133,7 @@ void *first_fit(size_t size) {
     printf("[DEBUG] in first_fit(), size = %ld\n", size);
 #endif
 
-    void *p, *bp;
+    void *p;
 
     p = heap_listp;
     while (!EB(p)) {
@@ -139,11 +141,10 @@ void *first_fit(size_t size) {
          * according to gprof, this is the most time-consuming
          * code, cuz time:O(n) of this function for each hit */
         if (RB_ALLOC(p) == BLK_FREE && RB_AVL_SIZE(p) >= size) {
-            if ((bp = place(p, size)) != NULL) {
-                return bp;
-            }
+            return place(p, size);
         }
         p = NEXT_BLKP(p);
+
     }
 
     return NULL;
@@ -159,7 +160,7 @@ void *next_fit(size_t size) {
     printf("[DEBUG] in next_fit(), size = %ld, heap_curp =  %p\n", size, heap_curp);
 #endif
 
-    void *oldp, *bp, *p;
+    void *oldp, *p;
 
     oldp = p = NEXT_BLKP(heap_curp);
 
@@ -169,12 +170,10 @@ void *next_fit(size_t size) {
             p = heap_listp;
         } else {
             if (RB_ALLOC(p) == BLK_FREE && RB_AVL_SIZE(p) >= size) {
-                if ((bp = place(p, size)) != NULL) {
 #ifdef DEBUG
-                    printf("[DEBUG] in next_fit(), FOUND! heap_curp =  %p\n", bp);
+                printf("[DEBUG] in next_fit(), FOUND! heap_curp =  %p\n", bp);
 #endif
-                    return bp;
-                }
+                return place(p, size);
             }
             p = NEXT_BLKP(p);
         }
@@ -189,7 +188,35 @@ void *next_fit(size_t size) {
  * @return
  */
 void *best_fit(size_t size) {
-    return NULL;
+#ifdef DEBUG
+    printf("[DEBUG] in best_fit(), size = %ld\n", size);
+#endif
+
+    void *p, *bestp;
+    size_t best, nsize;
+
+    best = MAX_HEAP;        /* cannot bigger than the maxheap */
+    bestp = NULL;
+    p = heap_listp;
+
+    while (!EB(p)) {
+        /* try to find a block that fits best */
+        nsize = RB_AVL_SIZE(p);
+        if (RB_ALLOC(p) == BLK_FREE && nsize >= size) {
+            if (nsize < best) {
+                best = nsize;
+                bestp = p;
+            }
+        }
+        p = NEXT_BLKP(p);
+    }
+
+    /* find nothing fit */
+    if (best == MAX_HEAP) {
+        return NULL;
+    }
+
+    return place(bestp, size);
 }
 
 /**

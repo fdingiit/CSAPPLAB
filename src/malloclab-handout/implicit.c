@@ -73,6 +73,7 @@
 #define NEXT_BLK_ALLOC(p)   GET_ALLOC(RB_NEXT_HDRP(p))
 #define NEXT_BLK_SIZE(p)    GET_SIZE(RB_NEXT_HDRP(p))
 
+#define TAIL_BLK(p) EB(NEXT_BLKP(ptr))      /* is ptr a tailing block? */
 
 void dump(char *, size_t, void *);
 
@@ -86,26 +87,25 @@ static void *heap_curp;     /* current block pointer */
  * @return
  */
 void *place(void *bp, size_t size) {
-    size_t asize, avasize, rsize, osize, nsize;
-    void *split;
+    size_t asize, rsize, osize, nsize;
+    void *splitp;
 
     if (RB_ALLOC(bp) == BLK_ALLOC) {
         return NULL;
     }
 
     asize = ALIGN(size);                                /* aligned size */
-    avasize = RB_AVL_SIZE(bp);                          /* available size */
+    nsize = asize + RB_HDR_SIZE + RB_FTR_SIZE;          /* new block size */
+    osize = RB_SIZE(bp);                                /* old block size */
 
     /* no enough room */
-    if (size > avasize) {
+    if (nsize > osize) {
         return NULL;
     }
 
-    osize = RB_SIZE(bp);                                /* old block size */
-    nsize = asize + RB_HDR_SIZE + RB_FTR_SIZE;          /* new block size if split */
     rsize = osize - nsize;                              /* remind size if the block will be split into 2 parts */
 
-    /* just fit, or cannot use remain memory after splitting */
+    /* cannot split */
     if (rsize < MIN_BLK_SIZE) {
         SET_RB(bp, osize, BLK_ALLOC);
         return bp;
@@ -113,8 +113,8 @@ void *place(void *bp, size_t size) {
 
     /* need to split */
     SET_RB(bp, nsize, BLK_ALLOC);
-    split = NEXT_BLKP(bp);
-    SET_RB(split, rsize, BLK_FREE);
+    splitp = NEXT_BLKP(bp);
+    SET_RB(splitp, rsize, BLK_FREE);
 
     return bp;
 }
@@ -144,7 +144,6 @@ void *first_fit(size_t size) {
             return place(p, size);
         }
         p = NEXT_BLKP(p);
-
     }
 
     return NULL;
@@ -202,11 +201,9 @@ void *best_fit(size_t size) {
     while (!EB(p)) {
         /* try to find a block that fits best */
         nsize = RB_AVL_SIZE(p);
-        if (RB_ALLOC(p) == BLK_FREE && nsize >= size) {
-            if (nsize < best) {
-                best = nsize;
-                bestp = p;
-            }
+        if (RB_ALLOC(p) == BLK_FREE && nsize >= size && nsize < best) {
+            best = nsize;
+            bestp = p;
         }
         p = NEXT_BLKP(p);
     }
@@ -225,7 +222,6 @@ void *best_fit(size_t size) {
  * @return
  */
 void *find_fit(size_t size) {
-    // TODO:
     // three strategies:
     // 1. first fit
     // 2. next fit
@@ -302,25 +298,20 @@ void *extend_heap(int size) {
     printf("[DEBUG] in extend_heap(), size = %d\n", size);
 #endif
 
-    void *old_brk;
+    void *old_brkp;
 
     if (size == 0) {
         return NULL;
     }
 
-    /* just do nothing if not aligned */
-    if (size % ALIGNMENT != 0) {
-        return NULL;
-    }
-
     /* do nothing if out of memory */
-    if ((old_brk = mem_sbrk(size)) == (void *) -1) {
+    if ((old_brkp = mem_sbrk(size)) == (void *) -1) {
         return NULL;
     }
 
-    SET_EB(NEXT_BLKP(old_brk));
+    SET_EB(NEXT_BLKP(old_brkp));
 
-    return old_brk;
+    return old_brkp;
 }
 
 /**
@@ -336,7 +327,7 @@ void *do_malloc(size_t size) {
 
     /* if no fitting block, try to extend the heap
      * wish we have free block at the tail of the heap that can be use
-     * or we have to alloc a totally new block for it */
+     * nor we have to alloc a totally new block for it */
     tailp = PREV_BLKP(mem_sbrk(0));
     if (RB_ALLOC(tailp) == BLK_FREE) {
 #ifdef DEBUG
@@ -356,8 +347,6 @@ void *do_malloc(size_t size) {
         if ((curp = extend_heap(tsize)) == NULL) {
             return NULL;
         }
-
-        /* and then try to place it at the new extended memory */
     }
 
     SET_RB(curp, size + RB_HDR_SIZE + RB_FTR_SIZE, BLK_ALLOC);
@@ -385,10 +374,11 @@ int implicit_mm_init(void) {
         return 1;
     }
 
-    SET(heap_listp, 0xDEADBEEF);        /* padding block */
-    SET(heap_listp + PADDING_BLK_SIZE, PACK(8, BLK_ALLOC));     /* prologue block header */
-    SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE, PACK(8, BLK_ALLOC));   /* prologue block footer */
-    SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE, PACK(0, BLK_ALLOC)); /* epilogue block header */
+    /* see CS:APP3e page 829 */
+    SET(heap_listp, 0xDEADBEEF);
+    SET(heap_listp + PADDING_BLK_SIZE, PACK(PB_HDR_SIZE + PB_FTR_SIZE, BLK_ALLOC));
+    SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE, PACK(PB_HDR_SIZE + PB_FTR_SIZE, BLK_ALLOC));
+    SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE, PACK(0, BLK_ALLOC));
 
     heap_listp += PADDING_BLK_SIZE + PB_HDR_SIZE;
 
@@ -405,7 +395,7 @@ int implicit_mm_init(void) {
  */
 void *implicit_mm_malloc(size_t size) {
     size_t asize;
-    void *cur;
+    void *curp;
 
     if (size == 0) {
         return NULL;
@@ -414,18 +404,18 @@ void *implicit_mm_malloc(size_t size) {
     asize = ALIGN(size);
 
     /* try to find a free block */
-    if ((cur = find_fit(asize)) != NULL) {
+    if ((curp = find_fit(asize)) != NULL) {
 #ifdef DUMP_HEAP
         dump("find fit", asize, cur);
 #endif
     } else {
-        cur = do_malloc(asize);
+        curp = do_malloc(asize);
     }
 
 #ifdef USE_NEXT_FIT
-    heap_curp = cur;
+    heap_curp = curp;
 #endif
-    return cur;
+    return curp;
 }
 
 /**
@@ -560,19 +550,22 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
      * all do not have enough room to realloc,
      * but the sum of them could fill the hole */
 
-    /* 1. alloc new memory
+    /* we have no free block to reuse
+     * try to extend the heap
+     * 1. alloc new memory
      *    if ptr points to the tail block, then we can just alloc a smaller block
      *    than the whole size
+     *    if ptr is not, we have to alloc one with full size
      * 2. copy if needed
      * 3. free old if needed
      * */
-    if (EB(NEXT_BLKP(ptr))) {
+    if (TAIL_BLK(ptr)) {
         /* tail block */
         if ((p = extend_heap(nsize - bsize)) == (void *) -1) {
             return NULL;
         }
     } else {
-        /* totally new block */
+        /* need a totally new block */
         if ((p = do_malloc(ALIGN(size))) == NULL) {
             return NULL;
         }

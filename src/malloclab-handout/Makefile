@@ -13,6 +13,10 @@ PROFILE = 0
 CC = gcc
 CFLAGS = -Wall
 
+ifeq ($(compiler), clang)
+	CC = clang
+endif
+
 ifeq ($(DEBUG), 1)
 	CFLAGS += -O0 -ggdb3 -DDEBUG
 

@@ -72,9 +72,10 @@
 #define NEXT_BLK_SIZE(p)    GET_SIZE(RB_NEXT_HDRP(p))
 
 
-void dump(char *, size_t);
+void dump(char *, size_t, void *);
 
 static void *heap_listp;    /* start point of the implicit heap list */
+static void *heap_curp;     /* current block pointer */
 
 /**
  * Try to place a block in bp
@@ -130,7 +131,7 @@ void *first_fit(size_t size) {
     printf("[DEBUG] in first_fit(), size = %ld\n", size);
 #endif
 
-    void *p, *ret;
+    void *p, *bp;
 
     p = heap_listp;
     while (!EB(p)) {
@@ -138,8 +139,8 @@ void *first_fit(size_t size) {
          * according to gprof, this is the most time-consuming
          * code, cuz time:O(n) of this function for each hit */
         if (RB_ALLOC(p) == BLK_FREE && RB_AVL_SIZE(p) >= size) {
-            if ((ret = place(p, size)) != NULL) {
-                return ret;
+            if ((bp = place(p, size)) != NULL) {
+                return bp;
             }
         }
         p = NEXT_BLKP(p);
@@ -154,6 +155,31 @@ void *first_fit(size_t size) {
  * @return
  */
 void *next_fit(size_t size) {
+#ifdef DEBUG
+    printf("[DEBUG] in next_fit(), size = %ld, heap_curp =  %p\n", size, heap_curp);
+#endif
+
+    void *oldp, *bp, *p;
+
+    oldp = p = NEXT_BLKP(heap_curp);
+
+    do {
+        if (EB(p)) {
+            /* start from head of the heap list */
+            p = heap_listp;
+        } else {
+            if (RB_ALLOC(p) == BLK_FREE && RB_AVL_SIZE(p) >= size) {
+                if ((bp = place(p, size)) != NULL) {
+#ifdef DEBUG
+                    printf("[DEBUG] in next_fit(), FOUND! heap_curp =  %p\n", bp);
+#endif
+                    return bp;
+                }
+            }
+            p = NEXT_BLKP(p);
+        }
+    } while (p != oldp);    /* stop if we return to the starting point */
+
     return NULL;
 }
 
@@ -227,7 +253,10 @@ void *coalesce(void *bp) {
     SET_RB(p, size, BLK_FREE);
 
 #ifdef DUMP_HEAP
-    dump("coalesce", 0);
+    dump("coalesce", size, bp);
+#endif
+#ifdef USE_NEXT_FIT
+    heap_curp = p;
 #endif
     return p;
 }
@@ -307,8 +336,12 @@ void *do_malloc(size_t size) {
     SET_RB(curp, size + RB_HDR_SIZE + RB_FTR_SIZE, BLK_ALLOC);
 
 #ifdef DUMP_HEAP
-    dump("alloc", size);
+    dump("alloc", size, curp);
 #endif
+#ifdef USE_NEXT_FIT
+    heap_curp = curp;
+#endif
+
     return curp;
 }
 
@@ -331,6 +364,10 @@ int implicit_mm_init(void) {
     SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE, PACK(0, BLK_ALLOC)); /* epilogue block header */
 
     heap_listp += PADDING_BLK_SIZE + PB_HDR_SIZE;
+
+#ifdef USE_NEXT_FIT
+    heap_curp = heap_listp;
+#endif
     return 0;
 }
 
@@ -352,13 +389,15 @@ void *implicit_mm_malloc(size_t size) {
     /* try to find a free block */
     if ((cur = find_fit(asize)) != NULL) {
 #ifdef DUMP_HEAP
-        dump("find fit", asize);
+        dump("find fit", asize, cur);
 #endif
-        return cur;
+    } else {
+        cur = do_malloc(asize);
     }
 
-    cur = do_malloc(asize);
-
+#ifdef USE_NEXT_FIT
+    heap_curp = cur;
+#endif
     return cur;
 }
 
@@ -369,7 +408,7 @@ void *implicit_mm_malloc(size_t size) {
 void implicit_mm_free(void *ptr) {
     SET_RB(ptr, RB_SIZE(ptr), BLK_FREE);
 #ifdef DUMP_HEAP
-    dump("free", RB_SIZE(ptr));
+    dump("free", RB_SIZE(ptr), ptr);
 #endif
     coalesce(ptr);
 }
@@ -427,7 +466,8 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
 #ifdef DEBUG
         printf("[DEBUG] in implicit_mm_realloc(): same size, return\n");
 #endif
-        return ptr;
+        p = ptr;
+        goto realloc;
     }
 
     /* smaller than the origin block, see if we must split it */
@@ -518,7 +558,10 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
 
     realloc:
 #ifdef  DUMP_HEAP
-    dump("realloc", size);
+    dump("realloc", size, p);
+#endif
+#ifdef USE_NEXT_FIT
+    heap_curp = p;
 #endif
     return p;
 }
@@ -527,13 +570,13 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
 /******************************************
  * heap dumper
  ******************************************/
-void dump(char *msg, size_t size) {
+void dump(char *msg, size_t size, void *p) {
     void *s;
 
     s = heap_listp;
 
     printf("\n");
-    printf("after %s %d(0x%x) memory:\n", msg, (int) size, (uint) size);
+    printf("after %s %d(0x%x) memory at %p:\n", msg, (int) size, (uint) size, p);
     printf("==========================================================================================\n");
     while (s != NULL && !EB(s)) {
         printf("%s\t", RB_ALLOC(s) ? "alloc" : "free");

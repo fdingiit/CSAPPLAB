@@ -4,13 +4,16 @@
 
 ALLOCATOR =
 STRATEGY = USE_IMPLICIT
-FIT = USE_FIRST_FIT
+
+# USE_FIRST_FIT
+# USE_NEXT_FIT
+FIT = USE_NEXT_FIT
 
 DEBUG = 0
 DUMP = 1
 PROFILE = 0
 
-CC = gcc
+CC = clang
 CFLAGS = -Wall
 
 ifeq ($(compiler), clang)

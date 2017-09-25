@@ -234,6 +234,8 @@ void *coalesce(void *bp) {
 
 /**
  * Extend the heap
+ * It is the ONLY function that other functions can call
+ * When they want to alloc memory
  * @param size: size of memory to extend the heap
  *              NOTE: it is caller's duty to rounds up to the nearest multiple of ALIGNMENT, and
  *                    it is caller's duty to calculate the header and footer within size
@@ -268,10 +270,9 @@ void *extend_heap(int size) {
 /**
  *
  * @param size not contain header and footer
- * @param tail
  * @return
  */
-void *do_malloc(size_t size, int tail) {
+void *do_malloc(size_t size) {
     void *tailp, *curp;
     size_t pasize, tsize;
 
@@ -281,7 +282,7 @@ void *do_malloc(size_t size, int tail) {
      * wish we have free block at the tail of the heap that can be use
      * or we have to alloc a totally new block for it */
     tailp = PREV_BLKP(mem_sbrk(0));
-    if (RB_ALLOC(tailp) == BLK_FREE || tail) {
+    if (RB_ALLOC(tailp) == BLK_FREE) {
 #ifdef DEBUG
         printf("[DEBUG] in do_malloc(): reuse tail block\n");
 #endif
@@ -320,7 +321,7 @@ void *do_malloc(size_t size, int tail) {
  * @return
  */
 int implicit_mm_init(void) {
-    if ((heap_listp = mem_sbrk(PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE + EB_HDR_SIZE)) == (void *) -1) {
+    if ((heap_listp = extend_heap(PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE + EB_HDR_SIZE)) == (void *) -1) {
         return 1;
     }
 
@@ -356,7 +357,7 @@ void *implicit_mm_malloc(size_t size) {
         return cur;
     }
 
-    cur = do_malloc(asize, 0);
+    cur = do_malloc(asize);
 
     return cur;
 }
@@ -500,12 +501,12 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
      * */
     if (EB(NEXT_BLKP(ptr))) {
         /* tail block */
-        if ((p = do_malloc((ALIGN(size)), 1)) == NULL) {
+        if ((p = extend_heap(nsize - bsize)) == (void *) -1) {
             return NULL;
         }
     } else {
         /* totally new block */
-        if ((p = do_malloc(ALIGN(size), 0)) == NULL) {
+        if ((p = do_malloc(ALIGN(size))) == NULL) {
             return NULL;
         }
         memcpy(p, ptr, RB_AVL_SIZE(ptr));
@@ -515,7 +516,7 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
     SET_RB(p, nsize, BLK_ALLOC);
     goto realloc;
 
-realloc:
+    realloc:
 #ifdef  DUMP_HEAP
     dump("realloc", size);
 #endif

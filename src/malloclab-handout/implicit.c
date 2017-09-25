@@ -380,7 +380,9 @@ void implicit_mm_free(void *ptr) {
  * @return
  */
 void *implicit_mm_realloc(void *ptr, size_t size) {
-    void *hdrp, *ftrp, *split, *prep, *p;
+    void *p;                            /* new block pointer that we should return */
+    void *hdrp, *ftrp, *splitp;
+    void *prep;
     size_t bsize, rsize, nsize, fsize;
     int alloc;
 
@@ -400,16 +402,14 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
      * 3. if the block size if no aligned, something wrong;
      * 4. if the header is not same with the footer, something wrong.
      * */
-    hdrp = RB_HDRP(ptr);
-    ftrp = RB_FTRP(ptr);
-    if (hdrp == NULL || ftrp == NULL) {
+    if ((hdrp = RB_HDRP(ptr)) == NULL || (ftrp = RB_FTRP(ptr)) == NULL) {
 #ifdef DEBUG
-        printf("[DEBUG] in implicit_mm_realloc(): null header or footer\n");
+        printf("[DEBUG] in implicit_mm_realloc(): illegal header or footer\n");
 #endif
         return NULL;
     }
 
-    bsize = RB_SIZE(ptr), alloc = RB_ALLOC(ptr);
+    bsize = RB_SIZE(ptr), alloc = RB_ALLOC(ptr);        /* current block size and its alloc state */
     if (alloc == BLK_FREE || bsize <= MIN_BLK_SIZE || bsize % ALIGNMENT != 0 || GET(hdrp) != GET(ftrp)) {
 #ifdef DEBUG
         printf("[DEBUG] in implicit_mm_realloc(): illegal realloc: %p, %ld, %d, %ld, %ld, 0x%x, 0x%x\n",
@@ -419,7 +419,7 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
     }
 
     /* legal block indeed, try to resize */
-    nsize = ALIGN(size) + RB_HDR_SIZE + RB_FTR_SIZE;
+    nsize = ALIGN(size) + RB_HDR_SIZE + RB_FTR_SIZE;        /* new size of the realloc block */
 
     /* same size with the origin block, do nothing */
     if (nsize == bsize) {
@@ -436,31 +436,41 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
         /* need to split */
         if (rsize >= MIN_BLK_SIZE) {
             SET_RB(ptr, nsize, BLK_ALLOC);
-            split = NEXT_BLKP(ptr);
-            SET_RB(split, rsize, BLK_FREE);
-#ifdef DUMP_HEAP
-            dump("split", nsize);
-#endif
+            splitp = NEXT_BLKP(ptr);
+            SET_RB(splitp, rsize, BLK_FREE);
         }
-
-        return ptr;
+        p = ptr;
+        goto realloc;
     }
 
     /* larger than the origin block,
      * see if we can use any free block */
 
-    /* check after */
-    fsize = NEXT_BLK_SIZE(ptr);
-    if ((NEXT_BLK_ALLOC(ptr) == BLK_FREE) && (nsize <= bsize + fsize)) {
-        fsize -= (nsize - bsize);
-        SET_RB(ptr, nsize, BLK_ALLOC);
-        if (fsize >= MIN_BLK_SIZE) {
-            SET_RB(NEXT_BLKP(ptr), fsize, BLK_FREE);
+    /* check the following block:
+     * if the next block is alloc, we can do nothing with it
+     * if the next block is free, and it has enough room, use it
+     * if the next block is free, but it has not enough room, but
+     * it is the tailing block, use it and extend the heap */
+    if (NEXT_BLK_ALLOC(ptr) == BLK_FREE) {
+        fsize = NEXT_BLK_SIZE(ptr);     /* block size that we can use of the next block */
+
+        if (nsize <= bsize + fsize) {
+            /* enough size */
+            fsize -= (nsize - bsize);
+            SET_RB(ptr, nsize, BLK_ALLOC);
+            if (fsize >= MIN_BLK_SIZE) {
+                SET_RB(NEXT_BLKP(ptr), fsize, BLK_FREE);
+            }
+            p = ptr;
+            goto realloc;
+        } else if (EB(NEXT_BLKP(ptr))) {
+            /* not enough, but the next block is the tail */
+            fsize = nsize - bsize - fsize;
+            extend_heap(fsize);
+            SET_RB(ptr, nsize, BLK_ALLOC);
+            p = ptr;
+            goto realloc;
         }
-#ifdef  DUMP_HEAP
-        dump("realloc", size);
-#endif
-        return ptr;
     }
 
     /* check previous */
@@ -473,11 +483,14 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
         if (fsize >= MIN_BLK_SIZE) {
             SET_RB(NEXT_BLKP(prep), fsize, BLK_FREE);
         }
-#ifdef  DUMP_HEAP
-        dump("realloc", size);
-#endif
-        return prep;
+        p = prep;
+        goto realloc;
     }
+
+    // TODO:
+    /* there is a case that, the prev and the next block
+     * all do not have enough room to realloc,
+     * but the sum of them could fill the hole */
 
     /* 1. alloc new memory
      *    if ptr points to the tail block, then we can just alloc a smaller block
@@ -498,8 +511,11 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
         memcpy(p, ptr, RB_AVL_SIZE(ptr));
         implicit_mm_free(ptr);
     }
-    SET_RB(p, nsize, BLK_ALLOC);
 
+    SET_RB(p, nsize, BLK_ALLOC);
+    goto realloc;
+
+realloc:
 #ifdef  DUMP_HEAP
     dump("realloc", size);
 #endif

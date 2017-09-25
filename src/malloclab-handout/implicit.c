@@ -73,7 +73,7 @@
 #define NEXT_BLK_ALLOC(p)   GET_ALLOC(RB_NEXT_HDRP(p))
 #define NEXT_BLK_SIZE(p)    GET_SIZE(RB_NEXT_HDRP(p))
 
-#define TAIL_BLK(p) EB(NEXT_BLKP(ptr))      /* is ptr a tailing block? */
+#define TAIL_BLK()     PREV_BLKP(mem_sbrk(0))          /* tailing block*/
 
 void dump(char *, size_t, void *);
 
@@ -328,7 +328,7 @@ void *do_malloc(size_t size) {
     /* if no fitting block, try to extend the heap
      * wish we have free block at the tail of the heap that can be use
      * nor we have to alloc a totally new block for it */
-    tailp = PREV_BLKP(mem_sbrk(0));
+    tailp = TAIL_BLK();
     if (RB_ALLOC(tailp) == BLK_FREE) {
 #ifdef DEBUG
         printf("[DEBUG] in do_malloc(): reuse tail block\n");
@@ -559,7 +559,7 @@ void *implicit_mm_realloc(void *ptr, size_t size) {
      * 2. copy if needed
      * 3. free old if needed
      * */
-    if (TAIL_BLK(ptr)) {
+    if (ptr == TAIL_BLK()) {
         /* tail block */
         if ((p = extend_heap(nsize - bsize)) == (void *) -1) {
             return NULL;

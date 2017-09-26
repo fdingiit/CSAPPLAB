@@ -596,7 +596,7 @@ void dump(char *msg, size_t size, void *p) {
     s = heap_listp;
 
     printf("\n");
-    printf("after %s %d(0x%x) memory at %p:\n", msg, (int) size, (uint) size, p);
+    printf("after %s %d(0x%x) memory at %p:\n", msg, (int) size, (int) size, p);
     printf("==========================================================================================\n");
     while (s != NULL && !EB(s)) {
         printf("%s\t", RB_ALLOC(s) ? "alloc" : "free");

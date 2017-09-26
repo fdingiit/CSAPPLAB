@@ -14,6 +14,9 @@
 #ifdef USE_IMPLICIT
     #include "implicit.h"
 #endif
+#ifdef USE_SEGREGATE_FIT
+    #include "segregate.h"
+#endif
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
@@ -40,6 +43,9 @@ int mm_init(void)
 #ifdef USE_IMPLICIT
     return implicit_mm_init();
 #endif
+#ifdef USE_SEGREGATE_FIT
+    return segregate_mm_init();
+#endif
     return 0;
 }
 
@@ -52,6 +58,9 @@ void *mm_malloc(size_t size)
 #ifdef USE_IMPLICIT
     return implicit_mm_malloc(size);
 #endif
+#ifdef USE_SEGREGATE_FIT
+    return segregate_mm_malloc(size);
+#endif
 }
 
 /*
@@ -62,6 +71,9 @@ void mm_free(void *ptr)
 #ifdef USE_IMPLICIT
     implicit_mm_free(ptr);
 #endif
+#ifdef USE_SEGREGATE_FIT
+    return segregate_mm_free(ptr);
+#endif
 }
 
 /*
@@ -71,6 +83,9 @@ void *mm_realloc(void *ptr, size_t size)
 {
 #ifdef USE_IMPLICIT
     return implicit_mm_realloc(ptr, size);
+#endif
+#ifdef USE_SEGREGATE_FIT
+    return segregate_mm_realloc(ptr, size);
 #endif
 }
 

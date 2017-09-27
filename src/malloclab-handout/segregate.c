@@ -11,7 +11,7 @@
 #define FLT_SLOT_NUM    11          /* freelist_table slots number*/
 #define FLT_SIZE        (FLT_SLOT_NUM * sizeof(void *))
 
-#define SET(p, val)     (*(unsigned int*)(p) = val)
+#define SET(p, val)     (*(unsigned int*)(p) = (val))
 #define GET(p)          (*(unsigned int*)(p))
 
 
@@ -300,12 +300,12 @@ void dump(char *msg, size_t size, void *p) {
     for (i = 0; i < FLT_SLOT_NUM; i++) {
         s = freelist_table + i;
 
-        if (i == index) {
-            printf("***");
-        }
-
         if ((bp = (void *) *(uintptr_t *) (s)) == NULL) {
             continue;
+        }
+
+        if (i == index) {
+            printf("***");
         }
 
         printf("slot [%zu]:\t", i);

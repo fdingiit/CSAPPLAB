@@ -2,10 +2,6 @@
 # Students' Makefile for the Malloc Lab
 #
 
-# amd64   	64bit
-# x86		32bit
-TARGET_ABI = AMD64
-
 ALLOCATOR =
 
 # USE_IMPLICIT
@@ -17,16 +13,13 @@ STRATEGY = USE_SEGREGATE_FIT
 # USE_BEST_FIT
 FIT = USE_BEST_FIT
 
-DEBUG = 1
+DEBUG = 0
 DUMP = 1
 PROFILE = 0
 
 CC = clang
 CFLAGS = -Wall
 
-ifeq ($(abi), x86)
-	TARGET_ABI = X86
-endif
 
 ifeq ($(compiler), clang)
 	CC = clang
@@ -40,7 +33,7 @@ ifeq ($(DEBUG), 1)
     endif
 endif
 
-CFLAGS += -D$(STRATEGY) -D$(FIT) -D$(TARGET_ABI)
+CFLAGS += -D$(STRATEGY) -D$(FIT)
 
 ifeq ($(PROFILE), 1)
 	CFLAGS += -pg

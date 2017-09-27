@@ -6,7 +6,7 @@
 #include "memlib.h"
 #include "utils.h"
 
-#define BLK_MIN_SIZE    (ALIGNMENT + BLK_HDR_SIZE)
+#define BLK_MIN_SIZE    (ALIGNMENT + ALIGN(sizeof(void *)))
 
 #define FLT_SLOT_NUM    11          /* freelist_table slots number*/
 #define FLT_SIZE        (FLT_SLOT_NUM * sizeof(void *))
@@ -29,7 +29,10 @@
 
 /* free block pointers */
 #define NEXT_FREE_BLKP(p)       ((void*) (*(uintptr_t*)(p)))
+#define PREV_FREE_BLKP(p)       ((void*) (*((uintptr_t*)(p) + 1)))
 
+#define SET_NEXT_FREE_BLK(bp, next)    (*(uintptr_t*)(bp) = (uintptr_t)(next))
+#define SET_PREV_FREE_BLK(bp, prev)    (*((uintptr_t*)(bp) + 1) = (uintptr_t)(prev))
 
 static void **freelist_table;
 
@@ -43,8 +46,21 @@ void dump(char *msg, size_t size, void *p);
  * @param bp
  */
 void freelist_insert(void *freelistp, void *bp) {
-    *(uintptr_t *) bp = *(uintptr_t *) (freelistp);
-    *(uintptr_t *) freelistp = (uintptr_t) bp;
+    void *firstp;
+
+    firstp = NEXT_FREE_BLKP(freelistp);
+    SET_NEXT_FREE_BLK(bp, firstp);
+    SET_NEXT_FREE_BLK(freelistp, bp);
+
+    /* no need to maintain prev pointer if the size is small enough */
+    if (freelistp == freelist_table) {
+        return;
+    }
+
+    SET_PREV_FREE_BLK(bp, freelistp);
+    if (firstp) {
+        SET_PREV_FREE_BLK(firstp, bp);
+    }
 }
 
 
@@ -55,10 +71,10 @@ void freelist_insert(void *freelistp, void *bp) {
  * @return
  */
 void *freelist_alloc(void *freelistp, size_t size) {
-    void *p, *nextp;
+    void *p, *nextp, *prevp;
     size_t asize, bavasize, rsize, bsize;
 
-    if ((p = (void *) (*(uintptr_t *) (freelistp))) == NULL) {
+    if ((p = NEXT_FREE_BLKP(freelistp)) == NULL) {
         return NULL;
     }
 
@@ -69,7 +85,7 @@ void *freelist_alloc(void *freelistp, size_t size) {
      * to maintain a prev pointer */
     if (size <= ALIGNMENT) {
         nextp = NEXT_FREE_BLKP(p);
-        *(uintptr_t *) (freelistp) = *(uintptr_t *) (nextp);
+        SET_NEXT_FREE_BLK(freelistp, nextp);
         return p;
     }
 
@@ -83,13 +99,20 @@ void *freelist_alloc(void *freelistp, size_t size) {
         bavasize = BLK_AVAL_SIZE(p);
 
         if (bavasize >= asize) {
+            nextp = NEXT_FREE_BLKP(p);
+            prevp = PREV_FREE_BLKP(p);
+            SET_NEXT_FREE_BLK(prevp, nextp);
+            if (nextp != NULL) {
+                SET_PREV_FREE_BLK(nextp, prevp);
+            }
+
             rsize = bavasize - asize;
             if (rsize >= BLK_MIN_SIZE) {
                 /* need to split */
                 bsize = asize + BLK_HDR_SIZE;
                 SET_BLK(p, bsize);
                 SET_BLK(NEXT_BLKP(p), rsize);
-                freelist_insert(freelist_table + flt_index(rsize), NEXT_BLKP(p));
+                freelist_insert(freelist_table + flt_index(rsize - BLK_HDR_SIZE), NEXT_BLKP(p));
             }
             return p;
         }
@@ -214,6 +237,9 @@ void *segregate_mm_malloc(size_t size) {
     for (i = index; i < FLT_SLOT_NUM; i++) {
         p = freelist_table + i;
         if ((bp = freelist_alloc(p, size)) != NULL) {
+#ifdef DEBUG
+            dump("alloc from freelist", size, bp);
+#endif
             return bp;
         }
     }
@@ -227,7 +253,7 @@ void *segregate_mm_malloc(size_t size) {
     bp = tailp + BLK_HDR_SIZE;
     SET_BLK(bp, bsize);
 #ifdef DEBUG
-    dump("alloc", size, bp);
+    dump("alloc from heap", size, bp);
 #endif
     return bp;
 }
@@ -263,7 +289,9 @@ void *segregate_mm_realloc(void *ptr, size_t size) {
  ******************************************/
 void dump(char *msg, size_t size, void *p) {
     void *s, *bp;
-    size_t i;
+    size_t i, index;
+
+    index = flt_index(size);
 
     printf("\n");
     printf("after %s %d(0x%x) memory at %p:\n", msg, (int) size, (uint) size, p);
@@ -272,13 +300,17 @@ void dump(char *msg, size_t size, void *p) {
     for (i = 0; i < FLT_SLOT_NUM; i++) {
         s = freelist_table + i;
 
+        if (i == index) {
+            printf("***");
+        }
+
         if ((bp = (void *) *(uintptr_t *) (s)) == NULL) {
             continue;
         }
 
         printf("slot [%zu]:\t", i);
         while (bp) {
-            printf("%p(%d)\t", bp, BLK_AVAL_SIZE(bp));
+            printf("%p(%u)\t", bp, BLK_AVAL_SIZE(bp));
             bp = NEXT_FREE_BLKP(bp);
         }
         printf("\n");

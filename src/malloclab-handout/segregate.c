@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "segregate.h"
 #include "memlib.h"
@@ -34,6 +35,8 @@ static void **freelist_table;
 
 size_t flt_index(int v);
 
+void dump(char *msg, size_t size, void *p);
+
 /**
  *
  * @param freelistp
@@ -41,7 +44,7 @@ size_t flt_index(int v);
  */
 void freelist_insert(void *freelistp, void *bp) {
     *(uintptr_t *) bp = *(uintptr_t *) (freelistp);
-    *(uintptr_t *) freelistp = *(uintptr_t *) bp;
+    *(uintptr_t *) freelistp = (uintptr_t) bp;
 }
 
 
@@ -223,6 +226,9 @@ void *segregate_mm_malloc(size_t size) {
 
     bp = tailp + BLK_HDR_SIZE;
     SET_BLK(bp, bsize);
+#ifdef DEBUG
+    dump("alloc", size, bp);
+#endif
     return bp;
 }
 
@@ -237,6 +243,9 @@ void segregate_mm_free(void *ptr) {
     index = flt_index(avasize);
 
     freelist_insert(freelist_table + index, ptr);
+#ifdef DEBUG
+    dump("free", avasize, ptr);
+#endif
 }
 
 /**
@@ -250,8 +259,29 @@ void *segregate_mm_realloc(void *ptr, size_t size) {
 }
 
 /******************************************
- * heap dumper
+ * freelist dumper
  ******************************************/
 void dump(char *msg, size_t size, void *p) {
+    void *s, *bp;
+    size_t i;
 
+    printf("\n");
+    printf("after %s %d(0x%x) memory at %p:\n", msg, (int) size, (uint) size, p);
+    printf("==========================================================================================\n");
+    printf("freelist_table:\n");
+    for (i = 0; i < FLT_SLOT_NUM; i++) {
+        s = freelist_table + i;
+
+        if ((bp = (void *) *(uintptr_t *) (s)) == NULL) {
+            continue;
+        }
+
+        printf("slot [%zu]:\t", i);
+        while (bp) {
+            printf("%p(%d)\t", bp, BLK_AVAL_SIZE(bp));
+            bp = NEXT_FREE_BLKP(bp);
+        }
+        printf("\n");
+    }
+    printf("==========================================================================================\n");
 }

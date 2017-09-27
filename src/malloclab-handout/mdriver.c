@@ -307,11 +307,11 @@ int main(int argc, char **argv) {
         trace = read_trace(tracedir, tracefiles[i]);
         mm_stats[i].ops = trace->num_ops;
         if (verbose > 1)
-            printf("Checking mm_malloc for correctness, ");
+            printf("Checking mm_malloc for correctness:\n");
         mm_stats[i].valid = eval_mm_valid(trace, i, &ranges);
         if (mm_stats[i].valid) {
             if (verbose > 1)
-                printf("efficiency, ");
+                printf("efficiency:\n");
             clean(trace);
             mm_stats[i].util = eval_mm_util(trace, i, &ranges);
             speed_params.ranges = ranges;

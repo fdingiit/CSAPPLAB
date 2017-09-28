@@ -1,6 +1,30 @@
 # RELEASE NOTE
 
 ---
+2017-9-28
+
+Segregate RC1, with O(N) coalesce strategy.
+
+```
+Results for mm malloc:
+trace  valid  util     ops      secs  Kops
+ 0       yes   97%    5694  0.000805  7072
+ 1       yes   95%    5848  0.000946  6179
+ 2       yes   97%    6648  0.001111  5981
+ 3       yes   98%    5380  0.000793  6782
+ 4       yes   99%   14400  0.000697 20648
+ 5       yes   86%    4800  0.006196   775
+ 6       yes   83%    4800  0.005848   821
+ 7       yes   55%    6000  0.016051   374
+ 8       yes   51%    7200  0.019417   371
+ 9       yes   38%   14401  0.046018   313
+10       yes   20%   14401  0.001737  8292
+Total          74%   89572  0.099621   899
+
+Perf index = 45 (util) + 40 (thru) = 85/100
+```
+
+
 2017-9-25
 
 Implicit allocator with best-fit placement policy finished:

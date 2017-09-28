@@ -343,7 +343,39 @@ void segregate_mm_free(void *ptr) {
  * @return
  */
 void *segregate_mm_realloc(void *ptr, size_t size) {
-    return NULL;
+    size_t asize, avasize;
+    void *np;
+
+    if (ptr == NULL) {
+        return segregate_mm_malloc(size);
+    }
+
+    if (size == 0) {
+        segregate_mm_free(ptr);
+        return NULL;
+    }
+
+    asize = ALIGN(size), avasize = BLK_AVAL_SIZE(ptr);
+
+    /* need more space */
+    if (asize > avasize) {
+        np = segregate_mm_malloc(asize);
+        memcpy(np, ptr, BLK_AVAL_SIZE(ptr));
+        segregate_mm_free(ptr);
+        return np;
+    }
+
+    /* if shrink */
+    if (asize < avasize) {
+        /* need to insert the reminder to freelist */
+        if (avasize - asize >= BLK_MIN_SIZE) {
+            SET_BLK(ptr, asize);
+            SET_BLK(NEXT_BLKP(ptr), avasize - asize);
+            segregate_mm_free(NEXT_BLKP(ptr));
+        }
+    }
+
+    return ptr;
 }
 
 /******************************************

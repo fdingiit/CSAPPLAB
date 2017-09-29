@@ -73,7 +73,7 @@
 #define SET_NEXT_FREE_BLK(bp, next)    (*(uintptr_t*)(bp) = (uintptr_t)(next))
 #define SET_PREV_FREE_BLK(bp, prev)    (*((uintptr_t*)(bp) + 1) = (uintptr_t)(prev))
 
-#define DELETE_FREE_BLK(bp) do {                    \
+#define FREELIST_DEL_BLK(bp) do {                   \
     void *prevp, *nextp;                            \
                                                     \
     if (BLK_SIZE(bp) > BLK_MIN_SIZE) {              \
@@ -105,15 +105,16 @@ void *coalesce(void *bp);
 void freelist_insert2(void *freelistp, void *bp) {
     void *nextp;
 
+#ifdef DEBUG
     if (BLK_STATE(bp) != BLK_FREE) {
         fprintf(stderr, "freeing a alloc block! %p\n", bp);
         exit(0);
     }
+#endif
 
     nextp = NEXT_FREE_BLKP(freelistp);
 
-    /* no need to maintain prev pointer if it is the smallest block
-     * the alBLK_MIN_SIZElocator allowed */
+    /* no need to maintain prev pointer if it is the smallest allowed block */
     if (BLK_SIZE(bp) == BLK_MIN_SIZE) {
         SET_NEXT_FREE_BLK(bp, nextp);
         SET_NEXT_FREE_BLK(freelistp, bp);
@@ -149,7 +150,7 @@ void freelist_insert(void *bp) {
  */
 void *freelist_alloc(void *freelistp, size_t size) {
     void *p;
-    size_t asize, bavasize, rsize;
+    size_t nsize, bsize, rsize;
 
     if ((p = NEXT_FREE_BLKP(freelistp)) == NULL) {
         return NULL;
@@ -159,21 +160,31 @@ void *freelist_alloc(void *freelistp, size_t size) {
      * if the reminder will be smaller than BLK_MIN_SIZE after splitting, do not split
      * if not, insert the reminder to a right freelist
      */
-    asize = ALIGN(size);
+    nsize = ALIGN(size) + BLK_HDR_SIZE + BLK_FTR_SIZE;
 
     while (p) {
-        bavasize = BLK_AVAL_SIZE(p);
+        bsize = BLK_SIZE(p);
 
-        if (bavasize >= asize) {
-            DELETE_FREE_BLK(p);
-            SET_BLK(p, asize + BLK_HDR_SIZE + BLK_FTR_SIZE, BLK_ALLOC);
+        if (bsize >= nsize) {
+            FREELIST_DEL_BLK(p);
+            rsize = bsize - nsize;
 
-            rsize = bavasize - asize;
             if (rsize >= BLK_MIN_SIZE) {
-                /* need to split */
+                /* need to split
+                 *
+                 * /-------------------bsize--------------------/
+                 * |hdr|                                    |ftr|
+                 * |hdr|                |ftr|hdr|           |ftr|
+                 * /--------nsize-----------/-------rsize-------/
+                 *
+                 * */
+                SET_BLK(p, nsize, BLK_ALLOC);
                 SET_BLK(NEXT_BLKP(p), rsize, BLK_FREE);
                 freelist_insert(NEXT_BLKP(p));
+            } else {
+                SET_BLK(p, BLK_SIZE(p), BLK_ALLOC);
             }
+
             return p;
         }
         p = NEXT_FREE_BLKP(p);
@@ -278,7 +289,7 @@ void *coalesce(void *bp) {
 #ifdef DEBUG
         printf("[DEBUG] coalescing next block: %p, size: %d\n", NEXT_BLKP(bp), NEXT_BLK_SIZE(bp));
 #endif
-        DELETE_FREE_BLK(NEXT_BLKP(bp));
+        FREELIST_DEL_BLK(NEXT_BLKP(bp));
         size += NEXT_BLK_SIZE(bp);
     }
 
@@ -286,7 +297,7 @@ void *coalesce(void *bp) {
 #ifdef DEBUG
         printf("[DEBUG] coalescing prev block: %p, size: %d\n", PREV_BLKP(bp), PREV_BLK_SIZE(bp));
 #endif
-        DELETE_FREE_BLK(PREV_BLKP(bp));
+        FREELIST_DEL_BLK(PREV_BLKP(bp));
         size += PREV_BLK_SIZE(bp);
         p = PREV_BLKP(bp);
     }

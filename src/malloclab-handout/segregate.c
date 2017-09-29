@@ -6,26 +6,65 @@
 #include "memlib.h"
 #include "utils.h"
 
-#define BLK_MIN_SIZE    (ALIGNMENT + ALIGN(sizeof(void *)))
+/* the smallest block's size we maintain*/
+#define BLK_MIN_SIZE    (BLK_HDR_SIZE + ALIGNMENT + BLK_FTR_SIZE)
 
-#define FLT_SLOT_NUM    11          /* freelist_table slots number*/
-#define FLT_SIZE        (FLT_SLOT_NUM * sizeof(void *))
+#define BLK_FREE    0
+#define BLK_ALLOC   1
+
+#define PACK(size, alloc) ((size) | (alloc))    /* pack size with alloc */
+
+#define GET_SIZE(p)     (GET(p) & ~0x7)
+#define GET_ALLOC(p)    (GET(p) & 0x1)
+
+/* padding block */
+#define PADDING_BLK_SIZE    4
+
+/* prologue block */
+#define PB_HDR_SIZE     4
+#define PB_FTR_SIZE     4
+
+/* epilogue block */
+#define EB_HDR_SIZE     4
+
+#define EB_HDRP(p)      ((void*)(p) - EB_HDR_SIZE)          /* epilogue block header pointer */
+#define SET_EB(p)       SET(EB_HDRP(p), PACK(0, 1))         /* set epilogue block */
+#define EB(p)           (BLK_SIZE(p) == 0 && BLK_STATE(p))         /* does p point to a epilogue block? */
 
 #define SET(p, val)     (*(unsigned int*)(p) = (val))
 #define GET(p)          (*(unsigned int*)(p))
 
+#define BLK_HDR_SIZE    4
+#define BLK_FTR_SIZE    4
 
-#define BLK_HDR_SIZE    8           /* we force the header be 8 bytes, cause we use 8-byte-alignment */
+#define BLK_SIZE(p)             GET_SIZE(BLK_HDRP(p))
+#define BLK_AVAL_SIZE(p)        (BLK_SIZE(p) - BLK_HDR_SIZE - BLK_FTR_SIZE)
 
-#define BLK_SIZE(p)             GET(BLK_HDRP(p))
-#define BLK_AVAL_SIZE(p)        (BLK_SIZE(p) - BLK_HDR_SIZE)
+#define BLK_STATE(p)            (GET_ALLOC(BLK_HDRP(p)))                 /* is the block alloced? */
 
 #define BLK_HDRP(p)             ((void*)(p) - BLK_HDR_SIZE)
+#define BLK_FTRP(p)             ((void*)(p) + BLK_AVAL_SIZE(p))
 
-#define SET_BLK(p, size)        SET(BLK_HDRP(p), size)
+#define SET_BLK(p, size, alloc)    do {                     \
+    SET(BLK_HDRP(p), PACK(size, alloc));                    \
+    SET(BLK_FTRP(p), PACK(size, alloc)); } while(0)
 
-/* block pointers */
-#define NEXT_BLKP(p)            ((void*)(p) + BLK_SIZE(p))
+/* pointer calculation */
+#define PREV_BLKP(p)    ((void*)(p) - PREV_BLK_SIZE(p))    /* prev block pointer */
+#define NEXT_BLKP(p)    ((void*)(p) + BLK_SIZE(p))          /* next block pointer */
+
+#define NEXT_HDRP(p)    BLK_HDRP((void*)(p) + BLK_SIZE(p))            /* next block header pointer */
+#define PREV_FTRP(p)    ((void*)(p) - BLK_HDR_SIZE - BLK_FTR_SIZE)    /* prev block footer pointer */
+
+/* block info */
+#define PREV_BLK_ALLOC(p)   GET_ALLOC(PREV_FTRP(p))
+#define PREV_BLK_SIZE(p)    GET_SIZE(PREV_FTRP(p))
+#define NEXT_BLK_ALLOC(p)   GET_ALLOC(NEXT_HDRP(p))
+#define NEXT_BLK_SIZE(p)    GET_SIZE(NEXT_HDRP(p))
+
+/* freelist table */
+#define FLT_SLOT_NUM    11          /* freelist_table slots number*/
+#define FLT_SIZE        (FLT_SLOT_NUM * sizeof(void *))
 
 /* free block pointers */
 #define NEXT_FREE_BLKP(p)       ((void*) (*(uintptr_t*)(p)))
@@ -50,46 +89,44 @@
 
 
 static void **freelist_table;
+static void *heap_listp;
 
 size_t flt_index(int v);
 
 void dump(char *msg, size_t size, void *p);
 
-void *coalesce(void *freelistp, void *bp);
+void *coalesce(void *bp);
 
 /**
  *
  * @param freelistp
  * @param bp
  */
-void *freelist_insert2(void *freelistp, void *bp) {
-    void *p, *nextp;
+void freelist_insert2(void *freelistp, void *bp) {
+    void *nextp;
+
+    if (BLK_STATE(bp) != BLK_FREE) {
+        fprintf(stderr, "freeing a alloc block! %p\n", bp);
+        exit(0);
+    }
 
     nextp = NEXT_FREE_BLKP(freelistp);
 
-    /* just insert into head if it is the smallest block */
+    /* no need to maintain prev pointer if it is the smallest block
+     * the alBLK_MIN_SIZElocator allowed */
     if (BLK_SIZE(bp) == BLK_MIN_SIZE) {
         SET_NEXT_FREE_BLK(bp, nextp);
         SET_NEXT_FREE_BLK(freelistp, bp);
-        return NULL;
-    }
-
-    /* try coalesce and insert */
-    p = coalesce(freelistp, bp);
-
-    if (freelistp != freelist_table + flt_index(BLK_AVAL_SIZE(p))) {
-        return p;
+        return;
     }
 
     nextp = NEXT_FREE_BLKP(freelistp);
-    SET_NEXT_FREE_BLK(p, nextp);
-    SET_PREV_FREE_BLK(p, freelistp);
-    SET_NEXT_FREE_BLK(freelistp, p);
+    SET_NEXT_FREE_BLK(bp, nextp);
+    SET_PREV_FREE_BLK(bp, freelistp);
+    SET_NEXT_FREE_BLK(freelistp, bp);
     if (nextp != NULL) {
-        SET_PREV_FREE_BLK(nextp, p);
+        SET_PREV_FREE_BLK(nextp, bp);
     }
-
-    return NULL;
 }
 
 /**
@@ -97,15 +134,10 @@ void *freelist_insert2(void *freelistp, void *bp) {
  * @param bp
  */
 void freelist_insert(void *bp) {
-    size_t index;
-    void *p = bp;
+    void *p;
 
-    while (1) {
-        index = flt_index(BLK_AVAL_SIZE(p));
-        if ((p = freelist_insert2(freelist_table + index, p)) == NULL) {
-            return;
-        }
-    }
+    p = coalesce(bp);
+    freelist_insert2(freelist_table + flt_index(BLK_AVAL_SIZE(p)), p);
 }
 
 
@@ -117,20 +149,10 @@ void freelist_insert(void *bp) {
  */
 void *freelist_alloc(void *freelistp, size_t size) {
     void *p;
-    size_t asize, bavasize, rsize, bsize;
+    size_t asize, bavasize, rsize;
 
     if ((p = NEXT_FREE_BLKP(freelistp)) == NULL) {
         return NULL;
-    }
-
-    /* if the size <= ALIGNMENT, then the min size of the block is ALIGNMENT,
-     * we have no need to split the free block cuz it's meaningless,
-     * so, the first freelist contains blocks of the same size of ALIGNMENT.
-     * we aways alloc block from the head of the list, so there is no need
-     * to maintain a prev pointer */
-    if (size <= ALIGNMENT) {
-        SET_NEXT_FREE_BLK(freelistp, NEXT_FREE_BLKP(p));
-        return p;
     }
 
     /* if the size > ALIGNMENT, then we may need to split a big block into two small one.
@@ -144,13 +166,12 @@ void *freelist_alloc(void *freelistp, size_t size) {
 
         if (bavasize >= asize) {
             DELETE_FREE_BLK(p);
-            rsize = bavasize - asize;
+            SET_BLK(p, asize + BLK_HDR_SIZE + BLK_FTR_SIZE, BLK_ALLOC);
 
+            rsize = bavasize - asize;
             if (rsize >= BLK_MIN_SIZE) {
                 /* need to split */
-                bsize = asize + BLK_HDR_SIZE;
-                SET_BLK(p, bsize);
-                SET_BLK(NEXT_BLKP(p), rsize);
+                SET_BLK(NEXT_BLKP(p), rsize, BLK_FREE);
                 freelist_insert(NEXT_BLKP(p));
             }
             return p;
@@ -191,6 +212,7 @@ void *extend_heap(int size) {
         return NULL;
     }
 
+    SET_EB(mem_sbrk(0));
     return old_brk;
 }
 
@@ -236,32 +258,45 @@ size_t flt_index(int v) {
 
 /**
  *
- * @param freelistp
  * @param bp
  * @return
  */
-void *coalesce(void *freelistp, void *bp) {
-    void *p, *coalp, *nextp;
+void *coalesce(void *bp) {
+    // four cases: (1 for alloc, 0 for free)
+    // prev, now, next
+    // 1, 0, 1
+    // 0, 0, 1
+    // 1, 0, 0
+    // 0, 0, 0
+    int size;
+    void *p;
 
-    p = NEXT_FREE_BLKP(freelistp);      /* first node in list */
-    coalp = bp;
+    size = BLK_SIZE(bp);
+    p = bp;
 
-    while (p) {
-        nextp = NEXT_FREE_BLKP(p);
-
-        if (coalp + BLK_SIZE(coalp) == p) {
-            DELETE_FREE_BLK(p);
-            SET_BLK(coalp, BLK_SIZE(coalp) + BLK_SIZE(p));
-        } else if (p + BLK_SIZE(p) == coalp) {
-            DELETE_FREE_BLK(p);
-            SET_BLK(p, BLK_SIZE(coalp) + BLK_SIZE(p));
-            coalp = p;
-        }
-
-        p = nextp;
+    if (NEXT_BLK_ALLOC(bp) == BLK_FREE) {
+#ifdef DEBUG
+        printf("[DEBUG] coalescing next block: %p, size: %d\n", NEXT_BLKP(bp), NEXT_BLK_SIZE(bp));
+#endif
+        DELETE_FREE_BLK(NEXT_BLKP(bp));
+        size += NEXT_BLK_SIZE(bp);
     }
 
-    return coalp;
+    if (PREV_BLK_ALLOC(bp) == BLK_FREE) {
+#ifdef DEBUG
+        printf("[DEBUG] coalescing prev block: %p, size: %d\n", PREV_BLKP(bp), PREV_BLK_SIZE(bp));
+#endif
+        DELETE_FREE_BLK(PREV_BLKP(bp));
+        size += PREV_BLK_SIZE(bp);
+        p = PREV_BLKP(bp);
+    }
+
+    SET_BLK(p, size, BLK_FREE);
+
+#ifdef DUMP_HEAP
+    dump("coalesce", size, bp);
+#endif
+    return p;
 }
 
 
@@ -277,10 +312,20 @@ int segregate_mm_init(void) {
     // 1. extend the heap for the freelist_table;
     // 2. init the freelist_table:
     //    {1-8, 9-16, 17-32, 33-64, ..., 4097-@#$}, 11 slots, 8 bytes per slot to store a pointer (64bit platform)
-    if ((freelist_table = extend_heap(FLT_SIZE)) == NULL) {
+    // 3. extend the heap for padding, pb, and eb.
+    if ((freelist_table = extend_heap(FLT_SIZE + PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE + EB_HDR_SIZE)) == NULL) {
         return 1;
     }
     memset(freelist_table, 0, FLT_SIZE);
+    heap_listp = freelist_table + FLT_SLOT_NUM;
+
+    SET(heap_listp, 0xDEADBEEF);        /* padding block */
+    SET(heap_listp + PADDING_BLK_SIZE, PACK(8, BLK_ALLOC));     /* prologue block header */
+    SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE, PACK(8, BLK_ALLOC));   /* prologue block footer */
+    SET(heap_listp + PADDING_BLK_SIZE + PB_HDR_SIZE + PB_FTR_SIZE, PACK(0, BLK_ALLOC)); /* epilogue block header */
+
+    heap_listp += PADDING_BLK_SIZE + PB_HDR_SIZE;
+
     return 0;
 }
 
@@ -296,7 +341,7 @@ void *segregate_mm_malloc(size_t size) {
     // 2.2 if not found, try freelist_table[N+1], continually, until nothing to check;
     // 3. if cannot find any block, try to extend the heap.
     size_t index, i, bsize;
-    void *p, *bp, *tailp;
+    void *p, *bp;
 
     index = flt_index(size);
 
@@ -312,13 +357,12 @@ void *segregate_mm_malloc(size_t size) {
     }
 
     /* no room in freelist */
-    bsize = ALIGN(size) + BLK_HDR_SIZE;
-    if ((tailp = extend_heap(bsize)) == NULL) {
+    bsize = ALIGN(size) + BLK_HDR_SIZE + BLK_FTR_SIZE;
+    if ((bp = extend_heap(bsize)) == NULL) {
         return NULL;
     }
 
-    bp = tailp + BLK_HDR_SIZE;
-    SET_BLK(bp, bsize);
+    SET_BLK(bp, bsize, BLK_ALLOC);
 #ifdef DEBUG
     dump("alloc from heap", size, bp);
 #endif
@@ -332,7 +376,7 @@ void *segregate_mm_malloc(size_t size) {
 void segregate_mm_free(void *ptr) {
     freelist_insert(ptr);
 #ifdef DEBUG
-    dump("free", avasize, ptr);
+    dump("free", BLK_AVAL_SIZE(ptr), ptr);
 #endif
 }
 
@@ -369,8 +413,8 @@ void *segregate_mm_realloc(void *ptr, size_t size) {
     if (asize < avasize) {
         /* need to insert the reminder to freelist */
         if (avasize - asize >= BLK_MIN_SIZE) {
-            SET_BLK(ptr, asize);
-            SET_BLK(NEXT_BLKP(ptr), avasize - asize);
+            SET_BLK(ptr, asize + BLK_HDR_SIZE + BLK_FTR_SIZE, BLK_ALLOC);
+            SET_BLK(NEXT_BLKP(ptr), avasize - asize, BLK_FREE);
             segregate_mm_free(NEXT_BLKP(ptr));
         }
     }
@@ -381,7 +425,7 @@ void *segregate_mm_realloc(void *ptr, size_t size) {
 /******************************************
  * freelist dumper
  ******************************************/
-void dump(char *msg, size_t size, void *p) {
+void freelist_dump(char *msg, size_t size, void *p) {
     void *s, *bp;
     size_t i, index;
 
@@ -408,6 +452,29 @@ void dump(char *msg, size_t size, void *p) {
             bp = NEXT_FREE_BLKP(bp);
         }
         printf("\n");
+    }
+    printf("==========================================================================================\n");
+}
+
+/******************************************
+ * heap dumper
+ ******************************************/
+void dump(char *msg, size_t size, void *p) {
+    void *s;
+
+    s = heap_listp;
+
+    printf("\n");
+    printf("after %s %d(0x%x) memory at %p:\n", msg, (int) size, (uint) size, p);
+    printf("==========================================================================================\n");
+    while (s != NULL && !EB(s)) {
+        printf("%s\t", BLK_STATE(s) ? "alloc" : "free");
+        printf("%8d(%8x)\t", BLK_SIZE(s), BLK_SIZE(s));
+        printf("%p --- ", s);
+        printf("%p\t", s + BLK_SIZE(s) - 1);
+        printf("%8x\t%8x\n", GET(BLK_HDRP(s)), GET(BLK_FTRP(s)));
+
+        s = NEXT_BLKP(s);
     }
     printf("==========================================================================================\n");
 }

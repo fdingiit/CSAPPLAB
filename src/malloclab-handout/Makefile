@@ -3,7 +3,10 @@
 #
 
 ALLOCATOR =
-STRATEGY = USE_IMPLICIT
+
+# USE_IMPLICIT
+# USE_SEGREGATE_FIT
+STRATEGY = USE_SEGREGATE_FIT
 
 # USE_FIRST_FIT
 # USE_NEXT_FIT
@@ -16,6 +19,7 @@ PROFILE = 0
 
 CC = clang
 CFLAGS = -Wall
+
 
 ifeq ($(compiler), clang)
 	CC = clang
@@ -39,6 +43,10 @@ ifeq ($(STRATEGY), USE_IMPLICIT)
 	ALLOCATOR=implicit
 endif
 
+ifeq ($(STRATEGY), USE_SEGREGATE_FIT)
+	ALLOCATOR=segregate
+endif
+
 OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o $(ALLOCATOR).o
 
 mdriver: $(OBJS)
@@ -54,6 +62,7 @@ clock.o: clock.c clock.h
 
 # allocators:
 implicit.o: implicit.c implicit.h memlib.h utils.h
+segregate.o: segregate.c segregate.h memlib.h utils.h
 
 clean:
 	rm -f *~ *.o mdriver
